@@ -1,0 +1,6 @@
+# Plantilla de administración de terceros: no cuenta como código propio
+public/src/**        linguist-vendored
+public/layout/**     linguist-vendored
+
+# Documentación: no debe dominar el cálculo de lenguajes
+docs/**              linguist-documentation
