@@ -1,0 +1,35 @@
+PROMPT PARA GENERAR: REY TIRANO JEFE FINAL
+Archivo necesario: boss-tyrant.png
+Ubicación: /var/www/asistente/public/images/enemies/
+
+=== PROMPT PARA GEMINI/DALL-E ===
+
+Create a pixel art image of a TYRANT KING FINAL BOSS for a family typing game. The king should be:
+- Imposing king with large golden crown
+- Royal purple robe with ermine
+- Royal scepter with glowing gem
+- Majestic beard
+- Serious but noble expression
+- Flowing cape
+- Golden ceremonial armor
+- Majestic and imposing posture
+- Golden aura of power (glowing effects)
+- Maybe surrounded by floating words or letters
+- Cartoon style, vibrant colors, transparent background
+- 256x256 pixels, appropriate for all ages
+
+=== ESPECIFICACIONES TÉCNICAS ===
+- Formato: PNG con fondo transparente
+- Tamaño: 256x256 píxeles
+- Calidad: Alta resolución
+- Estilo: Pixel art cartoon amigable
+- Público: Todas las edades
+- Uso: Juego de mecanografía educativo
+
+=== INSTRUCCIONES POST-GENERACIÓN ===
+1. Descargar la imagen generada
+2. Renombrar a: boss-tyrant.png
+3. Verificar que tenga fondo transparente
+4. Redimensionar a 256x256 si es necesario
+5. Colocar en: /var/www/asistente/public/images/enemies/
+

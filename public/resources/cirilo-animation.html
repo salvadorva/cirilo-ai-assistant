@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cirilo Animation</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f5f5f5;
+        }
+        
+        .animation-container {
+            position: relative;
+            width: 400px;
+            height: 400px;
+            overflow: hidden;
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        
+        .cirilo {
+            width: 100%;
+            height: 100%;
+            background-image: url('assistant.png');
+            background-size: cover;
+            background-position: center;
+            animation: breathe 4s infinite ease-in-out, subtle-move 10s infinite alternate ease-in-out;
+        }
+        
+        .eyes {
+            position: absolute;
+            top: 35%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            height: 20px;
+            display: flex;
+            justify-content: space-around;
+        }
+        
+        .eye {
+            width: 20px;
+            height: 20px;
+            background-color: #333;
+            border-radius: 50%;
+            position: relative;
+            overflow: hidden;
+            animation: blink 4s infinite;
+        }
+        
+        .eye::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 8px;
+            width: 6px;
+            height: 6px;
+            background-color: white;
+            border-radius: 50%;
+        }
+        
+        .mouth {
+            position: absolute;
+            top: 55%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 60px;
+            height: 20px;
+            border-bottom: 4px solid #333;
+            border-radius: 50%;
+            animation: talk 2s infinite alternate;
+        }
+        
+        .glow {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at center, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0) 70%);
+            animation: glow 3s infinite alternate;
+        }
+        
+        @keyframes breathe {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.03); }
+        }
+        
+        @keyframes subtle-move {
+            0% { transform: translateY(0); }
+            50% { transform: translateY(-5px); }
+            100% { transform: translateY(0); }
+        }
+        
+        @keyframes blink {
+            0%, 48%, 52%, 100% { height: 20px; }
+            50% { height: 2px; }
+        }
+        
+        @keyframes talk {
+            0%, 100% { height: 10px; width: 40px; }
+            50% { height: 15px; width: 50px; }
+        }
+        
+        @keyframes glow {
+            0% { opacity: 0.3; }
+            100% { opacity: 0.7; }
+        }
+    </style>
+</head>
+<body>
+    <div class="animation-container">
+        <div class="cirilo"></div>
+        <div class="eyes">
+            <div class="eye"></div>
+            <div class="eye"></div>
+        </div>
+        <div class="mouth"></div>
+        <div class="glow"></div>
+    </div>
+    
+    <script>
+        // Esta es solo una referencia para crear la animación
+        // En producción, usaremos un GIF o video pre-renderizado
+    </script>
+</body>
+</html> 

@@ -1,0 +1,118 @@
+{
+    "name": "Asistente Personal IA",
+    "short_name": "Asistente IA",
+    "description": "Tu asistente personal con IA para gestión de agenda, cursos de inglés y más",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#232946",
+    "theme_color": "#232946",
+    "orientation": "portrait-primary",
+    "scope": "/",
+    "lang": "es",
+    "dir": "ltr",
+    "categories": ["productivity", "education", "lifestyle"],
+    "icons": [
+        {
+            "src": "/pwa-icons/icon-72x72.png",
+            "sizes": "72x72",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/pwa-icons/icon-96x96.png",
+            "sizes": "96x96",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/pwa-icons/icon-128x128.png",
+            "sizes": "128x128",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/pwa-icons/icon-144x144.png",
+            "sizes": "144x144",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/pwa-icons/icon-152x152.png",
+            "sizes": "152x152",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/pwa-icons/icon-192x192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/pwa-icons/icon-384x384.png",
+            "sizes": "384x384",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/pwa-icons/icon-512x512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "Agenda",
+            "short_name": "Agenda",
+            "description": "Acceso rápido a tu agenda",
+            "url": "/agenda",
+            "icons": [
+                {
+                    "src": "/pwa-icons/icon-192x192.png",
+                    "sizes": "192x192"
+                }
+            ]
+        },
+        {
+            "name": "Tutor de Inglés",
+            "short_name": "Tutor",
+            "description": "Practica inglés con IA",
+            "url": "/tutor",
+            "icons": [
+                {
+                    "src": "/pwa-icons/icon-192x192.png",
+                    "sizes": "192x192"
+                }
+            ]
+        },
+        {
+            "name": "Cursos",
+            "short_name": "Cursos",
+            "description": "Tus cursos personalizados",
+            "url": "/cursos",
+            "icons": [
+                {
+                    "src": "/pwa-icons/icon-192x192.png",
+                    "sizes": "192x192"
+                }
+            ]
+        }
+    ],
+    "screenshots": [
+        {
+            "src": "/screenshots/desktop-screenshot.png",
+            "sizes": "1398x782",
+            "type": "image/png",
+            "form_factor": "wide",
+            "label": "Vista de escritorio de la aplicación"
+        },
+        {
+            "src": "/screenshots/mobile-screenshot.png",
+            "sizes": "384x822",
+            "type": "image/png",
+            "form_factor": "narrow",
+            "label": "Vista móvil de la aplicación"
+        }
+    ]
+}

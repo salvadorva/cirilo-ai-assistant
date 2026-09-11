@@ -1,0 +1,238 @@
+/* styles.css - Estilos para la aplicación Cirilo */
+
+/* Estilos generales para la aplicación */
+QMainWindow {
+    background-color: #f5f7fa;
+}
+
+/* Estilos para los botones */
+QPushButton {
+    background-color: #4a6fa5;
+    color: white;
+    border-radius: 8px;
+    padding: 12px 15px;
+    font-size: 15px;
+    font-weight: bold;
+    border: 1px solid #3a5a8c;
+    margin: 5px;
+}
+
+QPushButton:hover {
+    background-color: #3a5a8c;
+    border: 1px solid #2e4a75;
+}
+
+QPushButton:pressed {
+    background-color: #2e4a75;
+    padding-top: 13px;
+    padding-bottom: 11px;
+}
+
+QPushButton:disabled {
+    background-color: #a0a0a0;
+    color: #e0e0e0;
+    border: 1px solid #909090;
+}
+
+/* Botones especiales */
+QPushButton#talk_button {
+    background-color: #27ae60;
+}
+
+QPushButton#generate_image_button {
+    background-color: #9b59b6;
+}
+
+QPushButton#download_button {
+    background-color: #2980b9;
+}
+
+QPushButton#new_chat_button {
+    background-color: #e74c3c;
+}
+
+QPushButton#config_button {
+    background-color: #f39c12;
+}
+
+QPushButton#config_button:hover {
+    background-color: #d35400;
+}
+
+QPushButton#send_button {
+    background-color: #f39c12;
+}
+
+QPushButton#send_button:hover {
+    background-color: #e67e22;
+}
+
+/* Estilos para etiquetas */
+QLabel {
+    color: #34495e;
+    font-size: 16px;
+}
+
+#status_label {
+    font-size: 14px;
+    color: #7f8c8d;
+    font-style: italic;
+    padding: 5px;
+    background-color: rgba(255, 255, 255, 0.7);
+}
+
+#welcome_label {
+    font-size: 18px;
+    color: #2c3e50;
+    font-weight: bold;
+    margin: 5px 0 15px 0;
+    padding: 5px;
+    background-color: rgba(255, 255, 255, 0.7);
+    border-radius: 8px;
+}
+
+/* Estilos para el nuevo diseño de 2 columnas */
+#response_frame {
+    background-color: rgba(255, 255, 255, 0.85);
+    border-radius: 10px;
+    border: 1px solid #dcdde1;
+    /* box-shadow no es compatible con PyQt6 */
+    min-height: 350px;
+}
+
+#input_column {
+    background-color: rgba(255, 255, 255, 0.85);
+    border-radius: 10px;
+    border: 1px solid #dcdde1;
+    min-height: 350px;
+}
+
+#input_label {
+    font-weight: bold;
+    font-size: 16px;
+    color: #2c3e50;
+    margin-bottom: 10px;
+}
+
+#text_input {
+    border: 2px solid #3498db;
+    border-radius: 8px;
+    padding: 10px 15px;
+    font-size: 16px;
+    background-color: white;
+    min-height: 60px;
+}
+
+#text_input:focus {
+    border: 2px solid #2980b9;
+    background-color: #f8f9fa;
+    border-radius: 5px;
+}
+
+#title_label {
+    font-size: 32px;
+    font-weight: bold;
+    color: #2c3e50;
+    margin: 10px 0;
+}
+
+/* Estilos para el área de respuesta */
+#user_query {
+    font-size: 16px;
+    font-weight: bold;
+    color: #2c3e50;
+    background-color: rgba(236, 240, 241, 0.8);
+    padding: 10px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+}
+
+QTextBrowser {
+    background-color: rgba(255, 255, 255, 0.9);
+    color: #2c3e50;
+    border-radius: 8px;
+    padding: 15px;
+    font-size: 15px;
+    border: 1px solid #bdc3c7;
+}
+
+#response_frame {
+    background-color: rgba(255, 255, 255, 0.8);
+    border-radius: 12px;
+    border: 1px solid #bdc3c7;
+    padding: 15px;
+    margin: 10px;
+}
+
+/* Estilos para el campo de entrada de texto */
+QLineEdit {
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #bdc3c7;
+    background-color: white;
+    font-size: 15px;
+    color: #2c3e50;
+}
+
+QLineEdit:focus {
+    border: 2px solid #3498db;
+}
+
+/* Estilos para el contenedor principal */
+#main_container {
+    background-color: rgba(255, 255, 255, 0.6);
+    border-radius: 15px;
+    border: 1px solid #d0d0d0;
+}
+
+/* Estilos para el marco de estado */
+#status_frame {
+    background-color: rgba(245, 245, 245, 0.7);
+    border-radius: 8px;
+    padding: 5px;
+    margin: 5px 0;
+}
+
+/* Estilos para el marco de entrada de texto */
+#input_frame {
+    background-color: rgba(255, 255, 255, 0.8);
+    border-radius: 10px;
+    border: 1px solid #d0d0d0;
+    margin: 5px 0;
+}
+
+/* Estilos para el contenedor de botones */
+#buttons_container {
+    background-color: rgba(245, 245, 245, 0.7);
+    border-radius: 12px;
+    padding: 10px;
+    margin: 5px 0;
+}
+
+/* Estilos para scrollbars */
+QScrollBar:vertical {
+    border: none;
+    background: #f0f0f0;
+    width: 10px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background: #bdc3c7;
+    min-height: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #95a5a6;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+/* Estilos adicionales para botones */
+QPushButton:focus {
+    outline: none;
+    border: 2px solid #2980b9;
+}

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configurar SSL para PWA - Desarrollo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .step {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #007bff;
+        }
+        .warning {
+            background: #fff3cd;
+            border-left-color: #ffc107;
+            color: #856404;
+        }
+        .success {
+            background: #d4edda;
+            border-left-color: #28a745;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            border-left-color: #dc3545;
+            color: #721c24;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .code {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Configurar SSL para PWA - Desarrollo</h1>
+        
+        <div class="step warning">
+            <h3>⚠️ Problema Detectado</h3>
+            <p>El Service Worker no puede registrarse debido a un error de certificado SSL. Esto es común en desarrollo local.</p>
+        </div>
+
+        <div class="step">
+            <h3>🚀 Solución Rápida</h3>
+            <p>Para probar la PWA en desarrollo, puedes:</p>
+            
+            <h4>Opción 1: Usar HTTP (Limitado)</h4>
+            <button onclick="window.location.href='http://asistente.its/test-pwa.html'">
+                Probar con HTTP
+            </button>
+            <p><small>⚠️ Algunas funciones PWA no funcionarán completamente con HTTP</small></p>
+            
+            <h4>Opción 2: Aceptar Certificado SSL</h4>
+            <ol>
+                <li>Visita: <a href="https://asistente.its" target="_blank">https://asistente.its</a></li>
+                <li>Haz clic en "Avanzado" o "Advanced"</li>
+                <li>Haz clic en "Continuar a asistente.its (no seguro)"</li>
+                <li>Una vez aceptado, regresa a probar la PWA</li>
+            </ol>
+            
+            <button onclick="window.open('https://asistente.its', '_blank')">
+                Abrir HTTPS y Aceptar Certificado
+            </button>
+        </div>
+
+        <div class="step">
+            <h3>🔧 Configuración Permanente (Opcional)</h3>
+            <p>Para una solución permanente en desarrollo:</p>
+            
+            <div class="code">
+                # Instalar certificado en el sistema<br>
+                sudo cp /path/to/mkcert/rootCA.pem /usr/local/share/ca-certificates/mkcert-root.crt<br>
+                sudo update-ca-certificates
+            </div>
+            
+            <p>O en Chrome:</p>
+            <ol>
+                <li>Ve a chrome://settings/certificates</li>
+                <li>Pestaña "Authorities"</li>
+                <li>Importa el certificado root de mkcert</li>
+            </ol>
+        </div>
+
+        <div class="step">
+            <h3>✅ Verificar Configuración</h3>
+            <p>Una vez configurado el SSL, prueba la PWA:</p>
+            
+            <button onclick="testPWA()">Probar PWA con HTTPS</button>
+            <button onclick="testHTTP()">Probar PWA con HTTP</button>
+            
+            <div id="test-results" style="margin-top: 20px;"></div>
+        </div>
+
+        <div class="step success">
+            <h3>📱 Después de Configurar SSL</h3>
+            <p>Una vez que el certificado SSL esté funcionando:</p>
+            <ul>
+                <li>✅ Service Worker se registrará correctamente</li>
+                <li>✅ Aparecerá el botón "Instalar App" en Chrome</li>
+                <li>✅ La PWA funcionará completamente offline</li>
+                <li>✅ Podrás instalar la app como aplicación nativa</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        function testPWA() {
+            const results = document.getElementById('test-results');
+            results.innerHTML = '<p>🔄 Probando PWA con HTTPS...</p>';
+            
+            // Probar si HTTPS funciona
+            fetch('https://asistente.its/verify-pwa.php')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'ok') {
+                        results.innerHTML = `
+                            <div class="step success">
+                                <h4>✅ PWA Funcionando Correctamente</h4>
+                                <p>Puedes proceder a: <a href="https://asistente.its/test-pwa.html" target="_blank">Probar PWA</a></p>
+                            </div>
+                        `;
+                    } else {
+                        results.innerHTML = `
+                            <div class="step error">
+                                <h4>❌ Errores Encontrados</h4>
+                                <p>Revisa la configuración SSL y vuelve a intentar.</p>
+                            </div>
+                        `;
+                    }
+                })
+                .catch(error => {
+                    results.innerHTML = `
+                        <div class="step error">
+                            <h4>❌ Error de Conexión SSL</h4>
+                            <p>El certificado SSL aún no está configurado correctamente.</p>
+                            <p>Error: ${error.message}</p>
+                        </div>
+                    `;
+                });
+        }
+        
+        function testHTTP() {
+            const results = document.getElementById('test-results');
+            results.innerHTML = '<p>🔄 Probando PWA con HTTP...</p>';
+            
+            fetch('http://asistente.its/verify-pwa.php')
+                .then(response => response.json())
+                .then(data => {
+                    results.innerHTML = `
+                        <div class="step warning">
+                            <h4>⚠️ PWA con HTTP (Limitado)</h4>
+                            <p>Funciona parcialmente. Para funcionalidad completa usa HTTPS.</p>
+                            <p><a href="http://asistente.its/test-pwa.html" target="_blank">Probar PWA con HTTP</a></p>
+                        </div>
+                    `;
+                })
+                .catch(error => {
+                    results.innerHTML = `
+                        <div class="step error">
+                            <h4>❌ Error de Conexión</h4>
+                            <p>No se puede conectar al servidor.</p>
+                        </div>
+                    `;
+                });
+        }
+        
+        // Auto-detectar protocolo actual
+        if (location.protocol === 'https:') {
+            document.querySelector('.container').insertAdjacentHTML('afterbegin', `
+                <div class="step success">
+                    <h4>✅ Estás usando HTTPS</h4>
+                    <p>Perfecto para PWA. Si aún hay errores, acepta el certificado de desarrollo.</p>
+                </div>
+            `);
+        } else {
+            document.querySelector('.container').insertAdjacentHTML('afterbegin', `
+                <div class="step warning">
+                    <h4>⚠️ Estás usando HTTP</h4>
+                    <p>Para funcionalidad PWA completa, cambia a HTTPS.</p>
+                </div>
+            `);
+        }
+    </script>
+</body>
+</html>

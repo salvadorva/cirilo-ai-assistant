@@ -1,0 +1,35 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    paths:
+        - app/
+    level: 5
+    treatPhpDocTypesAsCertain: false
+    ignoreErrors:
+        # view() con strings dinámicos — falso positivo de Larastan
+        - '#Parameter \#1 \$view of function view expects view\-string\|null, string given#'
+        # Scopes de Eloquent llamados sobre relaciones HasMany/HasOne — soportados por Laravel en runtime
+        - '#Call to an undefined method Illuminate\\Database\\Eloquent\\Relations\\HasMany::#'
+        - '#Call to an undefined method Illuminate\\Database\\Eloquent\\Collection.*::#'
+        # Métodos privados marcados como unused — pueden usarse via callables o testing
+        - identifier: method.unused
+        # empty() sobre variable que siempre existe — comportamiento intencional en respuestas HTTP
+        - identifier: empty.variable
+        # Comparación idéntica siempre falsa — función retorna string|false, no null (comportamiento correcto)
+        - identifier: identical.alwaysFalse
+        # Condición siempre falsa — análisis de flujo no cubre todos los caminos de la API
+        - identifier: if.alwaysFalse
+        # Offset ?? sobre arrays con claves conocidas — Larastan no puede inferir el subset exacto
+        - identifier: nullCoalesce.offset
+        # Tipo no resoluble en callbacks de Collection::map() con DB raw queries
+        - identifier: argument.unresolvableType
+        # method_exists() sobre $this — PHPStan sabe que el método existe, intencional para seguridad
+        - identifier: function.alreadyNarrowedType
+        # Colección->count() vs query->count() — el count en colección ya cargada es correcto
+        - identifier: larastan.noUnnecessaryCollectionCall
+        # PHPDoc array<int,string> vs list<string> en $fillable/$hidden — diferencia cosmética de PHPDoc
+        - identifier: property.phpDocType
+    excludePaths:
+        - app/Console/Kernel.php
+        - app/Http/Kernel.php

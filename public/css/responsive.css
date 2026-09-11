@@ -1,0 +1,181 @@
+/* Estilos responsivos para la aplicación */
+
+/* Estilos base para todos los dispositivos */
+body {
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+/* Ajustes para el sidebar */
+.sidebar {
+    transition: all 0.3s ease;
+    overflow-y: auto;
+    z-index: 1040;
+}
+
+/* Ajustes para el contenido principal */
+#main-content {
+    transition: all 0.3s ease;
+}
+
+/* Ajustes para el navbar */
+#topNavbar {
+    transition: all 0.3s ease;
+}
+
+/* Estilos para pantallas grandes (>= 1200px) */
+@media (min-width: 1200px) {
+    .sidebar {
+        width: 250px;
+    }
+    .sidebar.collapsed {
+        width: 72px;
+    }
+    #main-content {
+        width: calc(100% - 250px);
+        margin-left: 250px;
+    }
+    .sidebar.collapsed ~ #main-content {
+        width: calc(100% - 72px);
+        margin-left: 72px;
+    }
+    #topNavbar {
+        width: calc(100% - 250px);
+        margin-left: 250px;
+        border-radius: 0 18px 18px 0;
+    }
+    .sidebar.collapsed ~ #topNavbar {
+        width: calc(100% - 72px);
+        margin-left: 72px;
+    }
+}
+
+/* Estilos para laptops pequeñas (992px - 1199px) */
+@media (min-width: 992px) and (max-width: 1199.98px) {
+    .sidebar {
+        width: 220px;
+    }
+    .sidebar.collapsed {
+        width: 72px;
+    }
+    #main-content {
+        width: calc(100% - 220px);
+        margin-left: 220px;
+    }
+    .sidebar.collapsed ~ #main-content {
+        width: calc(100% - 72px);
+        margin-left: 72px;
+    }
+    #topNavbar {
+        width: calc(100% - 220px);
+        margin-left: 220px;
+        border-radius: 0 18px 18px 0;
+    }
+    .sidebar.collapsed ~ #topNavbar {
+        width: calc(100% - 72px);
+        margin-left: 72px;
+    }
+}
+
+/* Estilos para tablets (768px - 991px) */
+@media (min-width: 768px) and (max-width: 991.98px) {
+    .sidebar {
+        left: -260px;
+        width: 260px;
+        margin: 0;
+        border-radius: 0;
+    }
+    .sidebar.show {
+        left: 0;
+    }
+    #main-content {
+        width: 100%;
+        margin-left: 0;
+        padding-left: 15px;
+        padding-right: 15px;
+    }
+    #topNavbar {
+        width: 100%;
+        margin-left: 0;
+        border-radius: 0;
+    }
+    .navbar-brand {
+        font-size: 1rem;
+    }
+}
+
+/* Estilos para móviles (<= 767px) */
+@media (max-width: 767.98px) {
+    .sidebar {
+        left: -260px;
+        width: 260px;
+        margin: 0;
+        border-radius: 0;
+    }
+    .sidebar.show {
+        left: 0;
+        box-shadow: 0 0 15px rgba(0,0,0,0.5);
+    }
+    #main-content {
+        width: 100%;
+        margin-left: 0;
+        padding: 10px;
+    }
+    #topNavbar {
+        width: 100%;
+        margin-left: 0;
+        border-radius: 0;
+        padding: 0.5rem;
+    }
+    .navbar-brand {
+        font-size: 0.9rem;
+    }
+    .container-fluid {
+        padding-left: 10px;
+        padding-right: 10px;
+    }
+    
+    /* Ajustes para tarjetas y contenedores en móvil */
+    .card {
+        margin-bottom: 15px;
+    }
+    .card-body {
+        padding: 15px;
+    }
+    
+    /* Ajustes para botones en móvil */
+    .btn {
+        padding: 0.375rem 0.75rem;
+    }
+    
+    /* Overlay para cuando el sidebar está abierto en móvil */
+    .sidebar-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(0,0,0,0.5);
+        z-index: 1030;
+    }
+    .sidebar-overlay.show {
+        display: block;
+    }
+}
+
+/* Ajustes específicos para dispositivos muy pequeños (<= 375px) */
+@media (max-width: 375px) {
+    #main-content {
+        padding: 8px;
+    }
+    .card-body {
+        padding: 12px;
+    }
+    .h1, h1 {
+        font-size: 1.75rem;
+    }
+    .h2, h2 {
+        font-size: 1.5rem;
+    }
+}

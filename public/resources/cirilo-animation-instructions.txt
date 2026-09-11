@@ -1,0 +1,32 @@
+INSTRUCCIONES PARA CREAR LA ANIMACIÓN DE CIRILO
+
+Para implementar la animación de Cirilo, tienes dos opciones:
+
+OPCIÓN 1: USAR UN GIF ANIMADO
+1. Toma la imagen actual de Cirilo (assistant.png)
+2. Usa una herramienta como GIMP, Photoshop o una herramienta online como EZGIF.com
+3. Crea una animación simple que incluya:
+   - Efecto de respiración (ligero zoom in/out)
+   - Parpadeo de ojos
+   - Ligero movimiento arriba/abajo
+   - Un suave brillo/resplandor
+4. Guarda el archivo como "cirilo-animation.gif" en la carpeta public/resources/
+5. Asegúrate de que el tamaño sea similar al de la imagen original (aproximadamente 400x400px)
+
+OPCIÓN 2: USAR UN VIDEO MP4
+1. Crea un video corto (5-10 segundos) con los mismos efectos mencionados arriba
+2. Guárdalo como "cirilo-animation.mp4" en la carpeta public/resources/
+3. Asegúrate de que sea un loop perfecto para que se pueda reproducir continuamente
+4. Comprime el video para que no sea demasiado pesado (menos de 1MB idealmente)
+
+OPCIÓN 3: USAR LA ANIMACIÓN CSS (TEMPORAL)
+1. Puedes usar el archivo HTML proporcionado (cirilo-animation.html) como referencia
+2. Graba la pantalla mientras se reproduce la animación
+3. Convierte la grabación a GIF o MP4
+
+IMPLEMENTACIÓN EN EL CÓDIGO:
+- En el archivo index.blade.php ya se ha implementado el código para mostrar el video/GIF
+- Si el navegador no soporta video, se mostrará la imagen estática como fallback
+- La animación se pausará cuando Cirilo esté "hablando" y se reanudará después
+
+Nota: Mientras no se cree el archivo de animación, el sistema mostrará la imagen estática original. 

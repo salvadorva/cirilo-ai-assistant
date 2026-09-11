@@ -1,0 +1,91 @@
+# ==============================================================================
+# Laravel .gitignore
+# ==============================================================================
+
+# Dependencias
+/vendor/
+/node_modules/
+
+# Variables de entorno (NUNCA subir al repositorio)
+.env
+.env.*
+!.env.example
+
+# Archivos de caché de Laravel
+/bootstrap/cache/*.php
+/storage/*.key
+storage/app/public/audio/dynamic/
+storage/app/public/courses/
+
+# Compilados de assets
+/public/build/
+/public/hot/
+/public/storage
+
+# Logs
+storage/logs/*.log
+
+# Archivos temporales del sistema
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# PHPUnit
+.phpunit.result.cache
+.phpunit.cache/
+
+# PHPStan
+/phpstan-baseline.neon
+
+# NPM / Vite
+npm-debug.log
+yarn-error.log
+/.pnp
+.pnp.js
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.project
+.settings/
+nbproject/
+
+# Sail
+docker-compose.override.yml
+
+# Scripts de utilidad / setup (no son parte del código fuente)
+create-basic-icons.html
+create-missing-icons.php
+create-real-icons.php
+create-screenshots-simple.php
+create-screenshots.php
+generate-icons.sh
+generate-pwa-icons.js
+generate_animation.js
+fix-ssl-certificate.sh
+
+# Archivos de documentación de IA (contexto privado del proyecto)
+CLAUDE.md
+
+# Archivos de backup
+*.backup
+*.bak
+
+# Artefactos locales que no deben publicarse
+/laravel
+/database/*.sqlite
+send_test_emails.php
+create_test_notifications.php
+/docs/*.sql
+
+# Páginas de prueba, no se publican
+/public/test-*.html
+/public/pwa-comparison.html
+
+# Escritorio
+/desktop/generated_images/
+/desktop/output.log
+/desktop/config.json

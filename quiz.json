@@ -1,0 +1,61 @@
+    {
+"listening": [
+        {"id": 1, "audio": "What time is it?", "expected": "What time is it?"},
+        {"id": 2, "audio": "Can you help me, please?", "expected": "Can you help me, please?"},
+        {"id": 3, "audio": "I would like a cup of coffee.", "expected": "I would like a cup of coffee."},
+        {"id": 4, "audio": "She works in a hospital.", "expected": "She works in a hospital."},
+        {"id": 5, "audio": "They are going to the park.", "expected": "They are going to the park."},
+        {"id": 6, "audio": "My name is John Smith.", "expected": "My name is John Smith."},
+        {"id": 7, "audio": "How are you feeling today?", "expected": "How are you feeling today?"},
+        {"id": 8, "audio": "The weather is nice today.", "expected": "The weather is nice today."},
+        {"id": 9, "audio": "I need to buy some groceries.", "expected": "I need to buy some groceries."},
+        {"id": 10, "audio": "Do you have any questions?", "expected": "Do you have any questions?"}
+    ],
+    "vocabulary": [
+        {"id": 1, "question": "What is the opposite of 'hot'?", "options": ["Cold", "Warm", "Big", "Fast"], "answer": "Cold"},
+        {"id": 2, "question": "What is this?", "image": "chair.jpg", "options": ["Bed", "Table", "Chair", "Sofa"], "answer": "Chair"},
+        {"id": 3, "question": "What do you wear on your feet?", "options": ["Hat", "Shoes", "Gloves", "Belt"], "answer": "Shoes"},
+        {"id": 4, "question": "What color is the sky on a sunny day?", "options": ["Red", "Blue", "Yellow", "Green"], "answer": "Blue"},
+        {"id": 5, "question": "What do bees make?", "options": ["Milk", "Oil", "Honey", "Bread"], "answer": "Honey"},
+        {"id": 6, "question": "Which animal says 'meow'?", "options": ["Dog", "Cat", "Cow", "Bird"], "answer": "Cat"},
+        {"id": 7, "question": "What do you use to write?", "options": ["Book", "Pen", "Phone", "Plate"], "answer": "Pen"},
+        {"id": 8, "question": "What is the opposite of 'big'?", "options": ["Small", "Large", "Huge", "Tall"], "answer": "Small"},
+        {"id": 9, "question": "What do you eat with?", "options": ["Fork", "Cup", "Pillow", "Book"], "answer": "Fork"},
+        {"id": 10, "question": "What is the first meal of the day?", "options": ["Lunch", "Dinner", "Breakfast", "Snack"], "answer": "Breakfast"}
+    ],
+    "grammar": [
+        {"id": 1, "question": "He ___ to school every day.", "options": ["go", "goes", "going", "gone"], "answer": "goes"},
+        {"id": 2, "question": "I ___ a student.", "options": ["is", "am", "be", "are"], "answer": "am"},
+        {"id": 3, "question": "Choose the correct sentence:", "options": ["She like cats", "She likes cats"], "answer": "She likes cats"},
+        {"id": 4, "question": "We ___ playing soccer now.", "options": ["is", "are", "am", "be"], "answer": "are"},
+        {"id": 5, "question": "They ___ to the party last night.", "options": ["go", "goes", "went", "going"], "answer": "went"},
+        {"id": 6, "question": "She ___ TV every evening.", "options": ["watch", "watches", "watching", "watched"], "answer": "watches"},
+        {"id": 7, "question": "I ___ my homework yesterday.", "options": ["do", "did", "done", "doing"], "answer": "did"},
+        {"id": 8, "question": "Choose the correct sentence:", "options": ["He don't like coffee", "He doesn't like coffee"], "answer": "He doesn't like coffee"},
+        {"id": 9, "question": "___ you like some water?", "options": ["Do", "Does", "Are", "Is"], "answer": "Do"},
+        {"id": 10, "question": "She ___ to the movies twice this week.", "options": ["go", "goes", "went", "has gone"], "answer": "has gone"}
+    ],
+    "speaking": [
+        {"id": 1, "prompt": "What is your name?", "criteria": "Name or phrase like 'My name is…' understandable"},
+        {"id": 2, "prompt": "Where do you live?", "criteria": "City, country or phrase 'I live in…' understandable"},
+        {"id": 3, "prompt": "What do you like to eat?", "criteria": "Understandable food or simple sentence"},
+        {"id": 4, "prompt": "What do you do in your free time?", "criteria": "Simple activity or sentence like 'I read books', 'I watch TV', understandable"},
+        {"id": 5, "prompt": "Can you describe your family?", "criteria": "Basic family description with words like mother, father, sister, brother, etc."},
+        {"id": 6, "prompt": "What would you like to learn in English?", "criteria": "Simple goals or interests related to language learning"},
+        {"id": 7, "prompt": "Describe your favorite animal.", "criteria": "Name of animal or sentence like 'My favorite animal is a dog', understandable"},
+        {"id": 8, "prompt": "How was your day today?", "criteria": "Simple description using words like good, bad, busy, etc."},
+        {"id": 9, "prompt": "What is your favorite color and why?", "criteria": "Color name and simple reason or preference"},
+        {"id": 10, "prompt": "Tell me about your favorite hobby.", "criteria": "Activity name and simple description of why they enjoy it"}
+    ],
+    "scoring": {
+        "max_points": 20,
+        "levels": [
+            {"range": [0, 7], "level": "A1"},
+            {"range": [8, 14], "level": "A2"},
+            {"range": [15, 20], "level": "B1"}
+        ]
+    }
+}
+
+
+
