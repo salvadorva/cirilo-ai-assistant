@@ -10,12 +10,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,6 +34,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.salvadorva.asistente.reminders.RemindersAction
 import com.salvadorva.asistente.ui.theme.*
 
 private val mono = FontFamily.Monospace
@@ -66,6 +71,17 @@ fun SettingsScreen(
         FocusConfigCard(
             privateMode = state.privateMode,
             onTogglePrivateMode = viewModel::setPrivateMode,
+        )
+
+        SectionLabel("// reminders.status")
+        RemindersStatusCard(
+            status = state.remindersStatus,
+            action = state.remindersAction,
+            claimInProgress = state.claimInProgress,
+            registrationInProgress = state.registrationInProgress,
+            message = state.claimMessage ?: state.registrationMessage,
+            onClaim = viewModel::confirmClaimInstallation,
+            onRetryRegistration = viewModel::retryRegistration,
         )
 
         Spacer(Modifier.height(8.dp))
@@ -255,6 +271,87 @@ private fun FocusConfigCard(
                 uncheckedBorderColor = CF_Dim.copy(alpha = 0.5f),
             ),
         )
+    }
+}
+
+@Composable
+private fun RemindersStatusCard(
+    status: String,
+    action: RemindersAction,
+    claimInProgress: Boolean,
+    registrationInProgress: Boolean,
+    message: String?,
+    onClaim: () -> Unit,
+    onRetryRegistration: () -> Unit,
+) {
+    var confirmClaim by remember { mutableStateOf(false) }
+    if (confirmClaim) {
+        AlertDialog(
+            onDismissRequest = { confirmClaim = false },
+            title = { Text("Este teléfono estaba vinculado a otra cuenta") },
+            text = {
+                Text("¿Usarlo con esta? La otra cuenta dejará de recibir recordatorios en este " +
+                    "teléfono; sus recordatorios siguen siendo suyos y aquí no se verán. " +
+                    "Se borrarán los avisos que quedaron de esa cuenta.")
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmClaim = false; onClaim() }) { Text("Usar con esta cuenta") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClaim = false }) { Text("Ahora no") }
+            },
+        )
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(CF_Purple.copy(alpha = 0.06f))
+            .border(1.dp, CF_Purple.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Text(
+            buildAnnotatedString {
+                withStyle(SpanStyle(color = CF_Purple, fontWeight = FontWeight.Bold)) { append("❯ ") }
+                withStyle(SpanStyle(color = CF_Text, fontWeight = FontWeight.SemiBold)) { append("recordatorios.acordados") }
+            },
+            fontFamily = mono,
+            fontSize = 14.sp,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(status, color = CF_Dim, fontFamily = mono, fontSize = 11.sp)
+        message?.let {
+            Spacer(Modifier.height(4.dp))
+            Text(it, color = CF_Pink, fontFamily = mono, fontSize = 11.sp)
+        }
+        // La tarjeta es informativa: solo el botón de la acción vigente es tocable.
+        when (action) {
+            RemindersAction.CLAIM -> CardActionButton(
+                label = if (claimInProgress) "> vinculando…" else "> usar este teléfono con esta cuenta",
+                enabled = !claimInProgress,
+                onClick = { confirmClaim = true }, // el reclamo exige confirmar (§8.1)
+            )
+            RemindersAction.RETRY_REGISTRATION -> CardActionButton(
+                label = if (registrationInProgress) "> registrando…" else "> Reintentar registro",
+                enabled = !registrationInProgress,
+                onClick = onRetryRegistration,
+            )
+            RemindersAction.NONE -> Unit
+        }
+    }
+}
+
+@Composable
+private fun CardActionButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Spacer(Modifier.height(8.dp))
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        border = BorderStroke(1.dp, if (enabled) CF_Purple else CF_Dim),
+        shape = RoundedCornerShape(10.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Text(label, color = if (enabled) CF_Purple else CF_Dim, fontFamily = mono, fontSize = 12.sp)
     }
 }
 

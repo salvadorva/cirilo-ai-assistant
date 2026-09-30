@@ -3,15 +3,12 @@ package com.salvadorva.asistente.ui.login
 import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.firebase.messaging.FirebaseMessaging
 import com.salvadorva.asistente.data.SessionManager
 import com.salvadorva.asistente.network.ApiClient
-import com.salvadorva.asistente.network.FcmTokenRequest
 import com.salvadorva.asistente.network.models.LoginRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
 
 sealed class LoginState {
     object Idle : LoginState()
@@ -24,13 +21,6 @@ class LoginViewModel(private val sessionManager: SessionManager) : ViewModel() {
 
     private val _state = MutableStateFlow<LoginState>(LoginState.Idle)
     val state: StateFlow<LoginState> = _state
-
-    private suspend fun registerFcmToken() {
-        try {
-            val token = FirebaseMessaging.getInstance().token.await()
-            ApiClient.deviceApi.registerToken(FcmTokenRequest(token))
-        } catch (_: Exception) {}
-    }
 
     fun login(email: String, password: String) {
         if (email.isBlank() || password.isBlank()) {
@@ -53,7 +43,7 @@ class LoginViewModel(private val sessionManager: SessionManager) : ViewModel() {
                         role  = body.user.role ?: "usuario"
                     )
                     ApiClient.setToken(body.token)
-                    registerFcmToken()
+                    // El registro del token FCM (con installation_id) lo agenda AppNavigation.
                     _state.value = LoginState.Success
                 } else {
                     _state.value = LoginState.Error("Credenciales incorrectas")

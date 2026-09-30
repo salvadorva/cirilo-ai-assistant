@@ -12,12 +12,9 @@ import com.salvadorva.asistente.data.SessionManager
 import com.salvadorva.asistente.focus.FocusNotifier
 import com.salvadorva.asistente.focus.FocusPlaybackService
 import com.salvadorva.asistente.navigation.putDeepLinkExtras
-import com.salvadorva.asistente.network.ApiClient
-import com.salvadorva.asistente.network.FcmTokenRequest
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import com.salvadorva.asistente.reminders.ReminderPushParser
+import com.salvadorva.asistente.reminders.Reminders
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 class AsistenteFcmService : FirebaseMessagingService() {
@@ -29,11 +26,9 @@ class AsistenteFcmService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                ApiClient.deviceApi.registerToken(FcmTokenRequest(token))
-            } catch (_: Exception) {}
-        }
+        // Misma installation_id, token nuevo. Va a WorkManager: en un proceso
+        // arrancado por FCM el bearer se lee de la sesión guardada, y sin red se reintenta.
+        Reminders.scheduleRegistration(applicationContext, fcmToken = token, force = true)
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
@@ -43,6 +38,15 @@ class AsistenteFcmService : FirebaseMessagingService() {
         // este service corra también en background y arme su propia notificación
         if (message.data["type"] == "focus_message") {
             handleFocusMessage(message.data)
+            return
+        }
+
+        // Recordatorio contextual v1: data-only. Validar, deduplicar y mostrar el
+        // aviso genérico; recibos y consultas van a WorkManager.
+        if (message.data["type"] == ReminderPushParser.TYPE) {
+            if (Reminders.hasSession(applicationContext)) {
+                Reminders.engine(applicationContext).onPush(message.data)
+            }
             return
         }
 

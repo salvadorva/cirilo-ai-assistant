@@ -1,0 +1,36 @@
+{
+  "id": "<uuid>",
+  "occurrence_id": "<uuid>",
+  "state": "pending",
+  "version": 1,
+  "scheduled_at": "2026-09-21T14:30:00Z",
+  "expires_at": "2026-09-21T16:00:00Z",
+  "timezone": "America/Guatemala",
+  "with_audio": false,
+  "dispatch": {
+    "state": "not_started",
+    "error_category": null
+  },
+  "title": "Enviar propuesta a Ana",
+  "context": "Acordamos cerrar la propuesta antes de la reunión del jueves.",
+  "next_action": "Abrir el borrador y enviarlo por correo.",
+  "confirmed_at": "2026-09-21T13:59:00Z",
+  "completed_at": null,
+  "cancelled_at": null,
+  "expired_at": null,
+  "audio_ready": false,
+  "actions": {
+    "complete": true,
+    "cancel": true,
+    "snooze_minutes": [
+      15,
+      30,
+      60
+    ]
+  },
+  "delivery_receipt": {
+    "received_at": null,
+    "displayed_at": null
+  },
+  "server_time": "2026-09-21T14:00:00Z"
+}

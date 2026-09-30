@@ -12,12 +12,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.lifecycleScope
 import com.salvadorva.asistente.data.SessionManager
 import com.salvadorva.asistente.navigation.AppNavigation
 import com.salvadorva.asistente.navigation.DeepLink
 import com.salvadorva.asistente.navigation.consumeDeepLink
+import com.salvadorva.asistente.reminders.Reminders
 import com.salvadorva.asistente.ui.theme.AsistenteTheme
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -46,6 +49,17 @@ class MainActivity : ComponentActivity() {
                     pendingDeepLink = pendingDeepLink,
                     onDeepLinkHandled = { pendingDeepLink = null }
                 )
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Al abrir la app: retirar avisos cerrados o caducados y reanudar la cola.
+        lifecycleScope.launch {
+            if (Reminders.ensureAuth(applicationContext)) {
+                runCatching { Reminders.engine(applicationContext).reconcile() }
+                Reminders.scheduleSync(applicationContext)
             }
         }
     }

@@ -1,3 +1,14 @@
+import java.util.Properties
+
+// URL del backend: `cirilo.baseUrl` en local.properties (no versionado) o -Pcirilo.baseUrl=...
+val localProps = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+val ciriloBaseUrl: String = (project.findProperty("cirilo.baseUrl") as String?)
+    ?: localProps.getProperty("cirilo.baseUrl")
+    ?: "https://your-backend.example.com/"
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -20,6 +31,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "BASE_URL", "\"${ciriloBaseUrl.trimEnd('/')}/\"")
     }
 
     buildTypes {
@@ -37,6 +49,11 @@ android {
     }
     buildFeatures {
         compose = true
+        // BuildConfig.DEBUG decide si existe el logging HTTP (network/HttpLogging.kt).
+        buildConfig = true
+    }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 }
 
@@ -62,7 +79,9 @@ dependencies {
     implementation(libs.coroutines.play.services)
     implementation(libs.coil.compose)
     implementation(libs.pdfbox.android)
+    implementation(libs.work.runtime.ktx)
     testImplementation(libs.junit)
+    testImplementation(libs.okhttp.mockwebserver)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

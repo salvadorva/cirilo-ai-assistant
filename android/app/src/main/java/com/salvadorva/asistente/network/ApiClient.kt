@@ -1,20 +1,23 @@
 package com.salvadorva.asistente.network
 
+import com.salvadorva.asistente.BuildConfig
+import com.salvadorva.asistente.reminders.ContextualReminderApi
 import okhttp3.OkHttpClient
-import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
 object ApiClient {
 
-    // Configura aquí la URL de tu backend (ver README)
-    const val BASE_URL = "https://your-backend.example.com/"
+    // Viene de `cirilo.baseUrl` (local.properties); el repo solo trae una URL de ejemplo.
+    val BASE_URL: String = BuildConfig.BASE_URL
 
-    private var token: String? = null
+    @Volatile private var token: String? = null
 
     fun setToken(t: String?) {
         token = t
     }
+
+    fun hasToken(): Boolean = token != null
 
     private val client by lazy {
         OkHttpClient.Builder()
@@ -28,9 +31,8 @@ object ApiClient {
                     .build()
                 chain.proceed(request)
             }
-            .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BODY
-            })
+            // Después del de auth para ver (redactada) la cabecera real. En release no existe.
+            .apply { HttpLogging.interceptor(BuildConfig.DEBUG)?.let(::addInterceptor) }
             .build()
     }
 
@@ -43,8 +45,8 @@ object ApiClient {
     }
 
     val authApi: AuthApi by lazy { retrofit.create(AuthApi::class.java) }
-    val deviceApi: DeviceApi by lazy { retrofit.create(DeviceApi::class.java) }
     val chatApi: ChatApi by lazy { retrofit.create(ChatApi::class.java) }
     val agendaApi: AgendaApi by lazy { retrofit.create(AgendaApi::class.java) }
     val focusSlotApi: FocusSlotApi by lazy { retrofit.create(FocusSlotApi::class.java) }
+    val contextualReminderApi: ContextualReminderApi by lazy { retrofit.create(ContextualReminderApi::class.java) }
 }

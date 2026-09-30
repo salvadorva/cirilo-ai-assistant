@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import com.salvadorva.asistente.navigation.DeepLink
 import com.salvadorva.asistente.ui.agenda.AgendaScreen
 import com.salvadorva.asistente.ui.chat.ChatScreen
+import com.salvadorva.asistente.ui.reminders.ContextualReminderDialog
 import com.salvadorva.asistente.ui.settings.SettingsScreen
 import com.salvadorva.asistente.ui.theme.CIR_Primary
 import com.salvadorva.asistente.ui.theme.CIR_PrimaryLight
@@ -48,6 +49,7 @@ fun MainScreen(
     var selectedKey by remember { mutableStateOf("Chat") }
     var agendaDeepLinkEventId by remember { mutableStateOf<Int?>(null) }
     var focusDeepLink by remember { mutableStateOf<DeepLink.Focus?>(null) }
+    var reminderDeepLink by remember { mutableStateOf<DeepLink.ContextualReminder?>(null) }
 
     LaunchedEffect(pendingDeepLink) {
         when (pendingDeepLink) {
@@ -61,6 +63,11 @@ fun MainScreen(
                 selectedKey = "Chat"
                 onDeepLinkHandled()
             }
+            is DeepLink.ContextualReminder -> {
+                // Se muestra sobre la pestaña actual; el detalle se pide ya autenticado.
+                reminderDeepLink = pendingDeepLink
+                onDeepLinkHandled()
+            }
             is DeepLink.ChatOpen,
             DeepLink.Chat -> {
                 selectedKey = "Chat"
@@ -68,6 +75,14 @@ fun MainScreen(
             }
             null -> {}
         }
+    }
+
+    reminderDeepLink?.let { link ->
+        ContextualReminderDialog(
+            reminderId = link.reminderId,
+            openSnooze = link.openSnooze,
+            onDismiss = { reminderDeepLink = null },
+        )
     }
 
     Scaffold(
