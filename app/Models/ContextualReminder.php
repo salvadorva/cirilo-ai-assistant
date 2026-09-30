@@ -17,6 +17,9 @@ class ContextualReminder extends Model
 
     public const PENDING = 'pending';
 
+    /** Título que queda tras retirar el contenido por retención (RC5). */
+    public const CONTENT_RETIRED_TITLE = 'Recordatorio (contenido retirado)';
+
     public const COMPLETED = 'completed';
 
     public const CANCELLED = 'cancelled';

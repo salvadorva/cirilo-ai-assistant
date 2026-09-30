@@ -89,3 +89,11 @@ Schedule::command('today:send-summary')
     ->everyMinute()
     ->withoutOverlapping()
     ->description('Resumen diario de agenda y pendientes');
+
+// RC5: retención de recordatorios contextuales. Solo borra con REMINDERS_RETENTION_PURGE_ENABLED=true
+// (requiere autorización); sin el flag no corre. Manual: `php artisan reminders:purge` informa.
+Schedule::command('reminders:purge --apply')
+    ->dailyAt('03:40')
+    ->withoutOverlapping()
+    ->when(fn () => (bool) config('reminders.retention_purge_enabled'))
+    ->description('Retención de recordatorios contextuales (contenido 7 días, metadatos 30)');

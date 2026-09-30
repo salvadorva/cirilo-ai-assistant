@@ -86,4 +86,7 @@ return [
     // idempotencia 30 días. La purga todavía no está implementada ni programada.
     'content_retention_days' => 7,
     'idempotency_retention_days' => 30,
+    // RC5: la purga programada solo borra si esto está activo (requiere autorización). Sin el flag,
+    // `reminders:purge` solo informa.
+    'retention_purge_enabled' => (bool) env('REMINDERS_RETENTION_PURGE_ENABLED', false),
 ];
