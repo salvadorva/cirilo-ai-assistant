@@ -16,7 +16,8 @@ return [
     'mobile_api_enabled' => (bool) env('REMINDERS_MOBILE_API_ENABLED', false),
     // Decisión de Salva (23/09/2026): piloto solo texto, sin audio. La variante
     // privada (RC4) está probada con TTS falso; activarla requiere nueva decisión.
-    'audio_enabled' => false,
+    // 30/09/2026: Salva aprueba el audio bajo petición (privado, sin reproducción automática).
+    'audio_enabled' => (bool) env('REMINDERS_AUDIO_ENABLED', false),
     'audio' => ['timeout_seconds' => 30],
 
     // RC2 — despacho durable. Apagado hasta autorizar el piloto.

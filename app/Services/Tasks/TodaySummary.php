@@ -29,6 +29,12 @@ class TodaySummary
             'events' => $events->map(fn (CalendarEvent $e) => self::describeEvent($e))->values()->all(),
             'tasks' => $tasks->map(fn ($t) => TaskService::describe($t))->values()->all(),
             'suggestions' => $this->tasks->suggestions($user)->map(fn ($t) => TaskService::describe($t))->values()->all(),
+            'preferences' => [
+                'enabled' => (bool) $user->daily_summary_enabled,
+                'time' => $user->daily_summary_time ?: '07:30',
+                'channel' => $user->daily_summary_channel ?: 'internal',
+                'days' => $user->daily_summary_days ?: 'weekdays',
+            ],
         ];
     }
 

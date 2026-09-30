@@ -196,7 +196,9 @@ class TodayAndTasksTest extends SecurityTestCase
         $this->artisan('today:send-summary')->assertExitCode(0);
         $this->assertSame(0, Notification::count(), 'Desactivado por defecto.');
 
+        $this->mobile('GET', '/api/mobile/today')->assertJsonPath('preferences.enabled', false)->assertJsonPath('preferences.time', '07:30');
         $this->actingAs($this->owner)->putJson('/hoy/preferencias', ['enabled' => true, 'time' => '08:00', 'channel' => 'internal', 'days' => 'weekdays'])->assertOk();
+        $this->mobile('GET', '/api/mobile/today')->assertJsonPath('preferences', ['enabled' => true, 'time' => '08:00', 'channel' => 'internal', 'days' => 'weekdays']);
         $this->artisan('today:send-summary')->assertExitCode(0);
         $this->artisan('today:send-summary')->assertExitCode(0);
 
