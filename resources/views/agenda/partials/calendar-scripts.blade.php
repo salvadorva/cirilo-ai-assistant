@@ -10,9 +10,23 @@
             return;
         }
         
+        // F2-07: enlace directo desde la tarjeta del chat (/agenda?fecha=YYYY-MM-DD&evento=ID)
+        const deepLink = new URLSearchParams(window.location.search);
+        const deepDate = /^\d{4}-\d{2}-\d{2}$/.test(deepLink.get('fecha') || '') ? deepLink.get('fecha') : null;
+        let deepEventId = /^\d+$/.test(deepLink.get('evento') || '') ? deepLink.get('evento') : null;
+
         // Inicializar calendario
         const calendar = new FullCalendar.Calendar(calendarEl, {
             initialView: 'dayGridMonth',
+            initialDate: deepDate || undefined,
+            eventsSet: function() {
+                if (!deepEventId) return;
+                const target = calendar.getEventById(deepEventId);
+                deepEventId = null;
+                if (target) {
+                    showEventDetailsModal(target.id, target.title, target.start, target.end, target.allDay, target.extendedProps);
+                }
+            },
             headerToolbar: {
                 left: 'prev,next today',
                 center: 'title',
@@ -101,6 +115,32 @@
         }
 
         // Función para mostrar modal de detalles del evento
+        // F3: estado de los avisos por canal. «Aceptado» es del proveedor; no significa recibido ni leído.
+        function loadEventNotifications(eventId) {
+            fetch('/agenda/events/' + encodeURIComponent(eventId), { headers: { 'Accept': 'application/json' } })
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                    const notices = data && data.event && data.event.notifications;
+                    const container = document.getElementById('eventDetails');
+                    if (!notices || !notices.length || !container) return;
+                    const channels = { internal: 'Cirilo', email: 'Correo', telegram: 'Telegram', fcm: 'Teléfono' };
+                    const kinds = { reminder: 'Recordatorio', start: 'Inicio' };
+                    const box = document.createElement('div');
+                    box.className = 'small border-top pt-2 mt-2';
+                    const heading = document.createElement('div');
+                    heading.className = 'fw-semibold mb-1';
+                    heading.textContent = 'Avisos';
+                    box.appendChild(heading);
+                    notices.forEach(n => {
+                        const row = document.createElement('div');
+                        row.textContent = (kinds[n.kind] || n.kind) + ' · ' + (channels[n.channel] || n.channel) + ': ' + n.label;
+                        box.appendChild(row);
+                    });
+                    container.appendChild(box);
+                })
+                .catch(() => {});
+        }
+
         function showEventDetailsModal(eventId, eventTitle, eventStart, eventEnd, eventAllDay, eventExtendedProps) {
             console.log('Mostrando modal para evento ID:', eventId);
             
@@ -197,6 +237,7 @@
 
             // Actualizar contenido del modal
             document.getElementById('eventDetails').innerHTML = eventDetailsHTML;
+            loadEventNotifications(eventId);
             
             // Configurar botón de eliminar
             const deleteButton = modalElement.querySelector('#deleteEventBtn');

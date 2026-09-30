@@ -1,0 +1,520 @@
+{
+  "version": 1,
+  "clock": "2026-09-21T08:00:00-06:00",
+  "timezone": "America/Guatemala",
+  "mode": "offline_controlled",
+  "notes": "Los probes diagnósticos no califican la respuesta del LLM. Un test verde de caracterización puede registrar known_gap. Concurrencia MySQL, calidad y latencia de proveedor requieren un piloto autorizado.",
+  "cases": [
+    {
+      "id": "E01",
+      "phase": "F0",
+      "input": "Texto/TTS sin sesión",
+      "context": "Sin usuario autenticado",
+      "expected": "401 sin llamadas externas",
+      "criteria": "401 sin llamadas externas",
+      "level": "integration",
+      "probe": "anonymous",
+      "target": [
+        401,
+        401
+      ],
+      "baseline": {
+        "status": "pass",
+        "observed": [
+          401,
+          401
+        ]
+      }
+    },
+    {
+      "id": "E02",
+      "phase": "F0",
+      "input": "A usa conversación de B",
+      "context": "Dos usuarios y conversación ficticia de B",
+      "expected": "404 sin lectura ni consumo",
+      "criteria": "404 sin lectura ni consumo",
+      "level": "integration",
+      "probe": "ownership",
+      "target": 404,
+      "baseline": {
+        "status": "pass",
+        "observed": 404
+      }
+    },
+    {
+      "id": "E03",
+      "phase": "F0",
+      "input": "Repetir petición tras el límite",
+      "context": "Una petición permitida por minuto",
+      "expected": "429 antes del proveedor",
+      "criteria": "429 antes del proveedor",
+      "level": "integration",
+      "probe": "rate",
+      "target": 429,
+      "baseline": {
+        "status": "pass",
+        "observed": 429
+      }
+    },
+    {
+      "id": "E04",
+      "phase": "F0",
+      "input": "<img src=x onerror=alert(1)>",
+      "context": "Render Markdown en Chromium sin red",
+      "expected": "No scripts ni atributos activos",
+      "criteria": "No scripts ni atributos activos",
+      "level": "browser",
+      "probe": "browser",
+      "target": "external_suite",
+      "baseline": {
+        "status": "external_suite",
+        "observed": "external_suite"
+      }
+    },
+    {
+      "id": "E05",
+      "phase": "F1",
+      "input": "1000 tokens de entrada, 200 salida",
+      "context": "gpt-4.1 y future-model",
+      "expected": "Costo 0.0036 USD y desconocido",
+      "criteria": "Costo 0.0036 USD y desconocido",
+      "level": "unit",
+      "probe": "pricing",
+      "target": [
+        0.0036,
+        null
+      ],
+      "baseline": {
+        "status": "pass",
+        "observed": [
+          0.0036,
+          null
+        ]
+      }
+    },
+    {
+      "id": "E06",
+      "phase": "F2",
+      "input": "Recuérdame llamar a Ana mañana a las 10",
+      "context": "Agenda vacía; reloj fijo",
+      "expected": "Un evento 2026-09-22 10:00",
+      "criteria": "Un evento 2026-09-22 10:00",
+      "level": "diagnostic",
+      "probe": "intent",
+      "target": true,
+      "baseline": {
+        "status": "pass",
+        "observed": true
+      }
+    },
+    {
+      "id": "E07",
+      "phase": "F2",
+      "input": "No quiero agendar una reunión mañana",
+      "context": "Agenda vacía",
+      "expected": "Ninguna acción de agenda",
+      "criteria": "Ninguna acción de agenda",
+      "level": "diagnostic",
+      "probe": "intent",
+      "target": false,
+      "baseline": {
+        "status": "pass",
+        "observed": false
+      }
+    },
+    {
+      "id": "E08",
+      "phase": "F2",
+      "input": "Puedes crear una función en PHP",
+      "context": "Agenda vacía",
+      "expected": "Programación sin activar agenda",
+      "criteria": "Programación sin activar agenda",
+      "level": "diagnostic",
+      "probe": "intent",
+      "target": false,
+      "baseline": {
+        "status": "pass",
+        "observed": false
+      }
+    },
+    {
+      "id": "E09",
+      "phase": "F2",
+      "input": [
+        "Agéndame una llamada mañana",
+        "a las 10"
+      ],
+      "context": "Extractor devuelve título y fecha sin hora",
+      "expected": "Solicitar hora; crear solo al completarla",
+      "criteria": "Solicitar hora; crear solo al completarla",
+      "level": "diagnostic",
+      "probe": "missing_time",
+      "target": false,
+      "baseline": {
+        "status": "pass",
+        "observed": false
+      }
+    },
+    {
+      "id": "E10",
+      "phase": "F2",
+      "input": "¿Qué tengo la próxima semana?",
+      "context": "Eventos ficticios esta semana y próxima",
+      "expected": "Consultar 2026-09-28 a 2026-10-04",
+      "criteria": "Consultar 2026-09-28 a 2026-10-04",
+      "level": "diagnostic",
+      "probe": "next_week",
+      "target": "NEXT_WEEK",
+      "baseline": {
+        "status": "pass",
+        "observed": "NEXT_WEEK"
+      }
+    },
+    {
+      "id": "E11",
+      "phase": "F2",
+      "input": "¿Qué tengo esta mañana?",
+      "context": "Eventos ficticios hoy y mañana",
+      "expected": "Consultar mañana de 2026-09-21",
+      "criteria": "Consultar mañana de 2026-09-21",
+      "level": "diagnostic",
+      "probe": "morning",
+      "target": "TODAY",
+      "baseline": {
+        "status": "pass",
+        "observed": "TODAY"
+      }
+    },
+    {
+      "id": "E12",
+      "phase": "F2",
+      "input": "Muévela a las 11",
+      "context": "Dos citas candidatas: Ana 09:00 y Luis 10:00",
+      "expected": "Pedir identificación antes de modificar",
+      "criteria": "Pedir identificación antes de modificar",
+      "level": "diagnostic",
+      "probe": "ambiguity",
+      "target": "asks_target",
+      "baseline": {
+        "status": "known_gap",
+        "observed": [["09:00", "10:00"], false],
+        "note": "Servidor: sin ruta de modificación por chat ni contrato de aclaración/acción pendiente. La redacción del modelo real se evalúa en F7-01."
+      }
+    },
+    {
+      "id": "E13",
+      "phase": "F2",
+      "input": "Reenviar la misma operación",
+      "context": "Misma petición; primero repetición secuencial en SQLite",
+      "expected": "Una sola persistencia; luego comprobar concurrencia en MySQL",
+      "criteria": "Una sola persistencia; luego comprobar concurrencia en MySQL",
+      "level": "diagnostic",
+      "probe": "duplicate",
+      "target": 1,
+      "baseline": {
+        "status": "pass",
+        "observed": 1
+      }
+    },
+    {
+      "id": "E14",
+      "phase": "F2",
+      "input": "Agéndame una llamada mañana a las 10",
+      "context": "Fallo simulado antes del primer INSERT",
+      "expected": "500 sin evento ni falsa confirmación",
+      "criteria": "500 sin evento ni falsa confirmación",
+      "level": "integration",
+      "probe": "db_failure",
+      "target": [
+        500,
+        0
+      ],
+      "baseline": {
+        "status": "pass",
+        "observed": [
+          500,
+          0
+        ]
+      }
+    },
+    {
+      "id": "E15",
+      "phase": "F2",
+      "input": "Agenda llamada diaria hasta el 23",
+      "context": "Fallo simulado en segundo INSERT de serie 21–23",
+      "expected": "Transacción deja cero eventos",
+      "criteria": "Transacción deja cero eventos",
+      "level": "diagnostic",
+      "probe": "atomic_series",
+      "target": 0,
+      "baseline": {
+        "status": "pass",
+        "observed": 0
+      }
+    },
+    {
+      "id": "E16",
+      "phase": "F2",
+      "input": "Agéndame una llamada mañana a las 10",
+      "context": "Móvil autenticado; extractor y texto simulados",
+      "expected": "event_created con identificador del evento persistido",
+      "criteria": "event_created con identificador del evento persistido",
+      "level": "integration",
+      "probe": "mobile_event",
+      "target": true,
+      "baseline": {
+        "status": "pass",
+        "observed": true
+      }
+    },
+    {
+      "id": "E17",
+      "phase": "F3",
+      "input": "Recordatorio 30 min antes y aviso de inicio",
+      "context": "Evento 08:30; ciclos a las 08:00 y 08:30",
+      "expected": "Dos notificaciones internas independientes",
+      "criteria": "Dos notificaciones internas independientes",
+      "level": "integration",
+      "probe": "two_moments",
+      "target": 2,
+      "baseline": {
+        "status": "pass",
+        "observed": 2
+      }
+    },
+    {
+      "id": "E18",
+      "phase": "F3",
+      "input": "Telegram falla; canal interno funciona",
+      "context": "Telegram 503; FCM simulado; dos ciclos",
+      "expected": "Dos intentos Telegram, una notificación interna",
+      "criteria": "Dos intentos Telegram, una notificación interna",
+      "level": "integration",
+      "probe": "telegram_retry",
+      "target": [
+        2,
+        1
+      ],
+      "baseline": {
+        "status": "pass",
+        "observed": [
+          2,
+          1
+        ]
+      }
+    },
+    {
+      "id": "E19",
+      "phase": "F3",
+      "input": "Scheduler vuelve con 10 min de retraso",
+      "context": "Un recordatorio vencido y otro 5 min en futuro",
+      "expected": "Recuperar vencido sin anticipar futuro",
+      "criteria": "Recuperar vencido sin anticipar futuro",
+      "level": "integration",
+      "probe": "catchup",
+      "target": [
+        true,
+        false
+      ],
+      "baseline": {
+        "status": "pass",
+        "observed": [
+          true,
+          false
+        ]
+      }
+    },
+    {
+      "id": "E20",
+      "phase": "F3",
+      "input": "Cancelar o reprogramar tras encolar",
+      "context": "Job creado; luego cancelar o mover una semana",
+      "expected": "No enviar correo de programación anterior",
+      "criteria": "No enviar correo de programación anterior",
+      "level": "integration",
+      "probe": "queued_stale",
+      "target": [
+        0,
+        0
+      ],
+      "baseline": {
+        "status": "pass",
+        "observed": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "E21",
+      "phase": "F3",
+      "input": "Enviar enfoque con FCM fallido",
+      "context": "Lunes 08:00; slot activo, sin audio; FCM false",
+      "expected": "last_sent_at no representa éxito",
+      "criteria": "last_sent_at no representa éxito",
+      "level": "integration",
+      "probe": "focus_failure",
+      "target": false,
+      "baseline": {
+        "status": "pass",
+        "observed": false
+      }
+    },
+    {
+      "id": "E22",
+      "phase": "F4",
+      "input": "¿Qué acordamos al inicio?",
+      "context": "Acuerdo privado seguido de 10 mensajes; conversación activa",
+      "expected": "Acuerdo disponible en contexto enviado",
+      "criteria": "Acuerdo disponible en contexto enviado",
+      "level": "integration",
+      "probe": "active_memory",
+      "target": true,
+      "baseline": {
+        "status": "pass",
+        "observed": true
+      }
+    },
+    {
+      "id": "E23",
+      "phase": "F4",
+      "input": "¿Qué acordamos en aquella sesión?",
+      "context": "Acuerdo en cuarta conversación por recencia",
+      "expected": "Dato relevante recuperable fuera de tres recientes",
+      "criteria": "Dato relevante recuperable fuera de tres recientes",
+      "level": "diagnostic",
+      "probe": "old_memory",
+      "target": true,
+      "baseline": {
+        "status": "pass",
+        "observed": true
+      }
+    },
+    {
+      "id": "E24",
+      "phase": "F4",
+      "input": "Continuar en móvil después de actualizar desde web",
+      "context": "Conversación con mensajes guardados y un nuevo mensaje web",
+      "expected": "API móvil contiene el nuevo mensaje",
+      "criteria": "API móvil contiene el nuevo mensaje",
+      "level": "integration",
+      "probe": "cross_client",
+      "target": true,
+      "baseline": {
+        "status": "pass",
+        "observed": true
+      }
+    },
+    {
+      "id": "E25",
+      "phase": "F4",
+      "input": "Recuerda que prefiero reuniones después de las 10",
+      "context": "Solo dos mensajes; iniciar siguiente sesión",
+      "expected": "Preferencia disponible en memoria",
+      "criteria": "Preferencia disponible en memoria",
+      "level": "diagnostic",
+      "probe": "brief_memory",
+      "target": true,
+      "baseline": {
+        "status": "pass",
+        "observed": true
+      }
+    },
+    {
+      "id": "E26",
+      "phase": "F4",
+      "input": "Corregir y olvidar preferencia",
+      "context": "Fact corregido, borrado y extracción antigua posterior",
+      "expected": "Lo olvidado no reaparece",
+      "criteria": "Lo olvidado no reaparece",
+      "level": "diagnostic",
+      "probe": "forgotten_memory",
+      "target": false,
+      "baseline": {
+        "status": "pass",
+        "observed": false
+      }
+    },
+    {
+      "id": "E27",
+      "phase": "F4",
+      "input": "Llega resumen atrasado y consulta usuario A",
+      "context": "Resumen de 12 mensajes; llega resumen viejo de 4; usuario B tiene dato privado",
+      "expected": "Conservar versión 12 y aislar B",
+      "criteria": "Conservar versión 12 y aislar B",
+      "level": "diagnostic",
+      "probe": "stale_memory",
+      "target": [
+        12,
+        false
+      ],
+      "baseline": {
+        "status": "pass",
+        "observed": [
+          12,
+          false
+        ]
+      }
+    },
+    {
+      "id": "E28",
+      "phase": "F5",
+      "input": "Voz desactivada; luego voz activa y TTS falla",
+      "context": "Dos llamadas con respuesta de texto simulada",
+      "expected": "Sin TTS al desactivar; texto conservado ante error",
+      "criteria": "Sin TTS al desactivar; texto conservado ante error",
+      "level": "integration",
+      "probe": "optional_audio",
+      "target": [
+        0,
+        true
+      ],
+      "baseline": {
+        "status": "pass",
+        "observed": [
+          0,
+          true
+        ]
+      }
+    },
+    {
+      "id": "E29",
+      "phase": "F5",
+      "input": "Streaming; detener tras guardar evento",
+      "context": "Flujo actual JSON; cancelación no implementada",
+      "expected": "Texto progresivo y estado persistido comunicado",
+      "criteria": "Texto progresivo y estado persistido comunicado",
+      "level": "integration",
+      "probe": "streaming",
+      "target": true,
+      "baseline": {
+        "status": "pass",
+        "observed": true
+      }
+    },
+    {
+      "id": "E30",
+      "phase": "F6",
+      "input": "¿Qué tengo hoy? Guardar pendiente sin fecha y completarlo",
+      "context": "Sin contrato persistente de pendientes definido",
+      "expected": "Vista Hoy coherente; cierre sin inventar hora",
+      "criteria": "Vista Hoy coherente; cierre sin inventar hora",
+      "level": "diagnostic",
+      "probe": "today",
+      "target": [
+        0,
+        true,
+        true
+      ],
+      "baseline": {
+        "status": "pass",
+        "observed": [
+          0,
+          true,
+          true
+        ],
+        "note": "F6 (30/09/2026): el pendiente sin fecha no crea evento, la respuesta trae task_created y existe App\\Models\\Task. Completar/posponer/descartar y la vista Hoy se prueban en tests/Feature/TodayAndTasksTest.php."
+      }
+    }
+  ]
+}

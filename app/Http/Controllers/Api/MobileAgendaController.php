@@ -4,6 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\CalendarEvent;
+use App\Services\Agenda\AgendaResult;
+use App\Services\Agenda\AgendaService;
+use App\Services\Agenda\AgendaValidationException;
+use App\Services\Agenda\EventNotifier;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -70,28 +74,32 @@ class MobileAgendaController extends Controller
             return response()->json(['message' => 'No encontrado'], 404);
         }
 
-        return response()->json($this->format($event));
+        return response()->json($this->format($event) + ['notifications' => EventNotifier::summary($event)]);
     }
 
     /**
      * POST /api/mobile/agenda/events
      */
-    public function store(Request $request): JsonResponse
+    public function store(Request $request, AgendaService $agenda): JsonResponse
     {
         $data = $this->validatePayload($request);
-        $data['user_id'] = $request->user()->id;
-        $data['status'] = 'pending';
-        $data['notified'] = false;
+        $key = $request->header('Idempotency-Key');
+        $result = $agenda->create($request->user(), $this->attributes($data), is_string($key) && $key !== '' ? mb_substr($key, 0, 100) : null, 'mobile_api');
 
-        $event = CalendarEvent::create($data);
-
-        return response()->json($this->format($event), 201);
+        return match ($result->status) {
+            AgendaResult::CREATED => response()->json($this->format($result->first()), 201),
+            AgendaResult::REPLAYED => response()->json($this->format($result->first()))->header('Idempotent-Replay', 'true'),
+            AgendaResult::DUPLICATE => response()->json($this->format($result->first()) + ['duplicate' => true]),
+            AgendaResult::CONFLICT => response()->json(['message' => $result->message, 'code' => 'idempotency_conflict'], 409),
+            AgendaResult::INVALID => response()->json(['message' => $result->message, 'errors' => ['start_date' => [$result->message]]], 422),
+            default => response()->json(['message' => 'No se pudo guardar el evento.'], 500),
+        };
     }
 
     /**
      * PUT /api/mobile/agenda/events/{id}
      */
-    public function update(Request $request, int $id): JsonResponse
+    public function update(Request $request, int $id, AgendaService $agenda): JsonResponse
     {
         $event = CalendarEvent::where('id', $id)
             ->where('user_id', $request->user()->id)
@@ -101,15 +109,19 @@ class MobileAgendaController extends Controller
             return response()->json(['message' => 'No encontrado'], 404);
         }
 
-        $event->update($this->validatePayload($request, $partial = true));
+        try {
+            $agenda->update($request->user(), $event, $this->attributes($this->validatePayload($request, $partial = true)));
+        } catch (AgendaValidationException $e) {
+            return response()->json(['message' => $e->getMessage(), 'errors' => ['start_date' => [$e->getMessage()]]], 422);
+        }
 
-        return response()->json($this->format($event));
+        return response()->json($this->format($event->fresh()));
     }
 
     /**
      * DELETE /api/mobile/agenda/events/{id}
      */
-    public function destroy(Request $request, int $id): JsonResponse
+    public function destroy(Request $request, int $id, AgendaService $agenda): JsonResponse
     {
         $event = CalendarEvent::where('id', $id)
             ->where('user_id', $request->user()->id)
@@ -119,7 +131,7 @@ class MobileAgendaController extends Controller
             return response()->json(['message' => 'No encontrado'], 404);
         }
 
-        $event->delete();
+        $agenda->delete($request->user(), $event);
 
         return response()->json(['ok' => true]);
     }
@@ -141,6 +153,18 @@ class MobileAgendaController extends Controller
         ];
 
         return $request->validate($rules);
+    }
+
+    /** Payload validado → entrada de AgendaService. Las fechas conservan el desfase que envía el teléfono. */
+    private function attributes(array $data): array
+    {
+        $map = ['start_date' => 'start', 'end_date' => 'end'];
+        $attributes = [];
+        foreach ($data as $key => $value) {
+            $attributes[$map[$key] ?? $key] = in_array($key, ['start_date', 'end_date', 'recurrence_end_date'], true) && $value !== null ? Carbon::parse($value) : $value;
+        }
+
+        return $attributes;
     }
 
     private function format(CalendarEvent $event): array

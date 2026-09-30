@@ -10,7 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use App\Support\AiLog as Log;
 use Illuminate\Support\Facades\Storage;
 
 class CourseController extends Controller
@@ -673,7 +673,7 @@ class CourseController extends Controller
             ])->timeout(60)->post($credentials['base_url'].'/images/generations', [
                 // gpt-image-1: dall-e-3 se apagó el 2026-05-12. No acepta style ni
                 // response_format, y la calidad va en low/medium/high (no standard).
-                'model' => 'gpt-image-1',
+                'model' => config('ai.models.image'),
                 'prompt' => $prompt,
                 'n' => 1,
                 'size' => '1024x1024',
@@ -779,7 +779,7 @@ class CourseController extends Controller
                     'Authorization' => 'Bearer '.$credentials['api_key'],
                     'Content-Type' => 'application/json',
                 ])->timeout(120)->post($credentials['base_url'].'/audio/speech', [
-                    'model' => 'tts-1-hd',
+                    'model' => config('ai.models.tts_hd'),
                     'input' => $chunk,
                     'voice' => 'nova', // Cambiado de 'echo' a 'nova' para mejor pronunciación en español
                     'response_format' => 'mp3',
@@ -1403,7 +1403,7 @@ class CourseController extends Controller
             'Authorization' => 'Bearer '.$credentials['api_key'],
             'Content-Type' => 'application/json',
         ])->timeout(180)->post($credentials['base_url'].'/chat/completions', [
-            'model' => 'gpt-4o',
+            'model' => config('ai.models.vision'),
             'messages' => [
                 [
                     'role' => 'system',

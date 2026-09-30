@@ -433,6 +433,13 @@
                                 <i class="fas fa-trash me-1"></i>Borrar toda mi memoria
                             </button>
                         </div>
+                        <div class="card-body border-bottom">
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" role="switch" id="memoryExtractionToggle" disabled>
+                                <label class="form-check-label" for="memoryExtractionToggle">Aprender de mis conversaciones automáticamente</label>
+                            </div>
+                            <small class="text-muted">Si lo apagas, sigo usando lo que ya sé y lo que me pidas recordar de forma explícita («llámame…»), pero no aprendo nada más por mi cuenta. Lo que borres no vuelvo a aprenderlo solo.</small>
+                        </div>
                         <div class="card-body" id="memoryContent">
                             <div class="text-center py-4 text-muted">
                                 <div class="spinner-border spinner-border-sm me-2"></div>Cargando...
@@ -493,6 +500,26 @@ document.getElementById('memoryTabLink').addEventListener('click', function () {
     loadMemory();
 });
 
+function escapeMemoryHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text ?? '';
+    return div.innerHTML;
+}
+
+const memoryToggle = document.getElementById('memoryExtractionToggle');
+memoryToggle.addEventListener('change', function () {
+    memoryToggle.disabled = true;
+    fetch('{{ route("settings.memory.extraction") }}', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+        body: JSON.stringify({ enabled: memoryToggle.checked })
+    })
+    .then(r => r.json())
+    .then(data => { if (!data.success) memoryToggle.checked = !memoryToggle.checked; })
+    .catch(() => { memoryToggle.checked = !memoryToggle.checked; })
+    .finally(() => { memoryToggle.disabled = false; });
+});
+
 function loadMemory() {
     const container = document.getElementById('memoryContent');
     const clearBtn  = document.getElementById('btnClearMemory');
@@ -505,6 +532,9 @@ function loadMemory() {
     .then(r => r.json())
     .then(data => {
         if (!data.success) { container.innerHTML = '<div class="alert alert-danger">Error al cargar la memoria.</div>'; return; }
+
+        memoryToggle.checked  = data.extraction_enabled !== false;
+        memoryToggle.disabled = false;
 
         const facts  = data.facts;
         const labels = data.category_labels;
@@ -525,16 +555,19 @@ function loadMemory() {
         let html = '';
         keys.forEach(cat => {
             const label = labels[cat] || cat;
-            html += `<div class="mb-4"><h6 class="text-muted text-uppercase small mb-2">${label}</h6><ul class="list-group list-group-flush">`;
+            html += `<div class="mb-4"><h6 class="text-muted text-uppercase small mb-2">${escapeMemoryHtml(label)}</h6><ul class="list-group list-group-flush">`;
             facts[cat].forEach(fact => {
-                const key   = fact.key.replace(/_/g, ' ');
+                const key   = escapeMemoryHtml(fact.key.replace(/_/g, ' '));
                 const badge = fact.confidence >= 0.8 ? 'success' : fact.confidence >= 0.6 ? 'warning' : 'secondary';
                 html += `
-                    <li class="list-group-item d-flex justify-content-between align-items-center px-0" id="fact-${fact.id}">
-                        <span><strong>${key}:</strong> ${fact.value}</span>
+                    <li class="list-group-item d-flex justify-content-between align-items-center px-0 gap-2" id="fact-${Number(fact.id)}">
+                        <span class="flex-grow-1"><strong>${key}:</strong> <span class="fact-value">${escapeMemoryHtml(fact.value)}</span></span>
                         <div class="d-flex align-items-center gap-2">
                             <span class="badge bg-${badge} bg-opacity-25 text-${badge}">${Math.round(fact.confidence * 100)}%</span>
-                            <button class="btn btn-sm btn-link text-danger p-0" onclick="deleteFact(${fact.id})" title="Eliminar">
+                            <button class="btn btn-sm btn-link text-secondary p-0" onclick="editFact(${Number(fact.id)})" title="Editar">
+                                <i class="fas fa-pen"></i>
+                            </button>
+                            <button class="btn btn-sm btn-link text-danger p-0" onclick="deleteFact(${Number(fact.id)})" title="Olvidar">
                                 <i class="fas fa-times"></i>
                             </button>
                         </div>
@@ -545,6 +578,49 @@ function loadMemory() {
         container.innerHTML = html;
     })
     .catch(() => { container.innerHTML = '<div class="alert alert-danger">Error de conexión.</div>'; });
+}
+
+function editFact(id) {
+    const item = document.getElementById('fact-' + id);
+    const valueEl = item && item.querySelector('.fact-value');
+    if (!valueEl || item.querySelector('input')) return;
+
+    const original = valueEl.textContent;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 500;
+    input.className = 'form-control form-control-sm d-inline-block w-auto';
+    input.value = original;
+    valueEl.replaceWith(input);
+    input.focus();
+
+    let done = false;
+    const restore = (text) => {
+        const span = document.createElement('span');
+        span.className = 'fact-value';
+        span.textContent = text;
+        input.replaceWith(span);
+    };
+    const save = () => {
+        if (done) return;
+        done = true;
+        const value = input.value.trim();
+        if (!value || value === original) { restore(original); return; }
+        input.disabled = true;
+        fetch(`{{ url('settings/memory') }}/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': '{{ csrf_token() }}', 'Accept': 'application/json' },
+            body: JSON.stringify({ value })
+        })
+        .then(r => r.json())
+        .then(data => restore(data.success ? data.fact.value : original))
+        .catch(() => restore(original));
+    };
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') save();
+        if (e.key === 'Escape') { done = true; restore(original); }
+    });
+    input.addEventListener('blur', save, { once: true });
 }
 
 function deleteFact(id) {

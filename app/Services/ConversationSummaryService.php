@@ -3,9 +3,11 @@
 namespace App\Services;
 
 use App\Models\Conversation;
+use App\Models\User;
 use App\Models\UserProfileFact;
 use GuzzleHttp\Client;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use App\Support\AiLog as Log;
 
 class ConversationSummaryService
 {
@@ -20,7 +22,8 @@ class ConversationSummaryService
     {
         $messageCount = count($messages);
 
-        if ($messageCount < self::RESUMEN_MINIMO_MENSAJES) {
+        // F4-08: un intercambio breve con instrucción explícita («recuerda que…») sí se procesa.
+        if ($messageCount < self::RESUMEN_MINIMO_MENSAJES && ! $this->hasExplicitMemoryCue($messages)) {
             return;
         }
 
@@ -30,7 +33,8 @@ class ConversationSummaryService
             return;
         }
 
-        if ($force && $newMessages === 0 && $conversation->summary) {
+        // Nada nuevo que resumir: tampoco se permite que un resumen de menos mensajes pise uno más reciente.
+        if ($newMessages <= 0) {
             return;
         }
 
@@ -41,28 +45,52 @@ class ConversationSummaryService
 
         $currentProfile = MemoryService::getUserProfile($conversation->user_id);
 
-        $result = $this->generateSummary(
+        $result = app(AiTelemetry::class)->forUser($conversation->user_id, fn () => $this->generateSummary(
             $messages,
             $apiKey,
             $conversation->summary,
             $conversation->summarized_message_count ?? 0,
-            $currentProfile
-        );
+            $currentProfile,
+            MemoryService::forgottenKeys($conversation->user_id)
+        ));
 
-        if ($result) {
-            $conversation->summary                  = $result['summary'];
-            $conversation->summarized_message_count = $messageCount;
-            $conversation->topics                   = $result['topics'] ?? null;
-            $conversation->decisions                = $result['decisions'] ?? null;
-            $conversation->pending_items            = $result['pending_items'] ?? null;
+        if (! $result) {
+            return;
+        }
+
+        // Otra petición pudo guardar un resumen que cubre más mensajes mientras el modelo respondía.
+        $applied = DB::transaction(function () use ($conversation, $result, $messageCount) {
+            $current = Conversation::whereKey($conversation->id)->lockForUpdate()->first();
+            if (! $current || ($current->summarized_message_count ?? 0) >= $messageCount) {
+                return false;
+            }
+
+            $current->summary                  = $result['summary'];
+            $current->summarized_message_count = $messageCount;
+            $current->topics                   = $result['topics'] ?? null;
+            $current->decisions                = $result['decisions'] ?? null;
+            $current->pending_items            = $result['pending_items'] ?? null;
             if (! empty($result['title'])) {
-                $conversation->title = $result['title'];
+                $current->title = $result['title'];
             }
-            $conversation->saveQuietly();
+            $current->saveQuietly();
+            $conversation->setRawAttributes($current->getAttributes(), true);
 
-            if (! empty($result['extracted_facts'])) {
-                MemoryService::saveFacts($conversation->user_id, $result['extracted_facts']);
+            return true;
+        });
+
+        // F4-06: con la extracción apagada se sigue resumiendo, pero no se aprenden hechos.
+        $extractionEnabled = (bool) (User::whereKey($conversation->user_id)->value('memory_extraction_enabled') ?? true);
+        // F6-02: los puntos pendientes del resumen son sugerencias para revisar, no compromisos.
+        if ($applied && ! empty($result['pending_items']) && is_array($result['pending_items'])) {
+            $owner = User::find($conversation->user_id);
+            if ($owner) {
+                app(\App\Services\Tasks\TaskService::class)->suggest($owner, $result['pending_items'], $conversation->id);
             }
+        }
+
+        if ($applied && $extractionEnabled && ! empty($result['extracted_facts'])) {
+            MemoryService::saveFacts($conversation->user_id, $result['extracted_facts'], $conversation->id);
         }
     }
 
@@ -103,7 +131,8 @@ class ConversationSummaryService
         string $apiKey,
         ?string $existingSummary = null,
         int $fromIndex = 0,
-        array $currentProfile = []
+        array $currentProfile = [],
+        array $forgottenKeys = []
     ): ?array {
         $isIncremental = $existingSummary && $fromIndex > 0;
 
@@ -126,9 +155,14 @@ class ConversationSummaryService
             $profileContext = "\n\nPERFIL ACTUAL DEL USUARIO (no re-extraer lo que ya está con el mismo valor):\n"
                 . json_encode($currentProfile, JSON_UNESCAPED_UNICODE);
         }
+        if (! empty($forgottenKeys)) {
+            $profileContext .= "\n\nDATOS QUE EL USUARIO PIDIÓ OLVIDAR (no volver a extraerlos):\n".implode(', ', $forgottenKeys);
+        }
 
         $extractionRules = "\n\nREGLAS PARA extracted_facts:"
             . "\n- Solo información EXPLÍCITA o fuertemente implícita del usuario"
+            . "\n- NO extraer lo que propuso o sugirió el asistente, salvo que el usuario lo aceptara de forma explícita"
+            . "\n- Si el usuario contradice o corrige un dato del PERFIL ACTUAL, usa action=update con el valor nuevo (misma category y key)"
             . "\n- NO inventes ni asumas"
             . "\n- NO extraer: contraseñas, datos bancarios, números de tarjeta"
             . "\n- confidence: 0.9=explícito, 0.7=implícito claro, 0.5=inferido"
@@ -151,14 +185,14 @@ class ConversationSummaryService
         }
 
         try {
-            $client   = new Client(['timeout' => 15]);
-            $response = $client->post('https://api.openai.com/v1/chat/completions', [
+            $client   = app(AiTransport::class)->client(['timeout' => 15]);
+            $response = app(InteractionTracker::class)->measure('summary_memory', fn () => $client->post('https://api.openai.com/v1/chat/completions', [
                 'headers' => [
                     'Authorization' => "Bearer {$apiKey}",
                     'Content-Type'  => 'application/json',
                 ],
                 'json' => [
-                    'model'       => 'gpt-4o-mini',
+                    'model'       => config('ai.models.summary'),
                     'temperature' => 0.3,
                     'max_tokens'  => 700,
                     'messages'    => [
@@ -166,7 +200,7 @@ class ConversationSummaryService
                         ['role' => 'user',   'content' => $userContent],
                     ],
                 ],
-            ]);
+            ]));
 
             $data    = json_decode($response->getBody(), true);
             $content = trim($data['choices'][0]['message']['content'] ?? '');
@@ -195,6 +229,17 @@ class ConversationSummaryService
 
             return null;
         }
+    }
+
+    private function hasExplicitMemoryCue(array $messages): bool
+    {
+        foreach ($messages as $msg) {
+            if (($msg['role'] ?? '') === 'user' && ExplicitMemoryService::hasCue($msg['content'] ?? '')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function buildTranscript(array $messages): string

@@ -374,7 +374,6 @@
 
 @push('scripts')
 <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
@@ -403,7 +402,10 @@ document.addEventListener('DOMContentLoaded', function () {
     // ── Estado ──
     let currentState       = 'idle';   // idle | listening | thinking | speaking | muted
     let isRecording        = false;
-    let voiceEnabled       = true;
+    // F5-01: misma preferencia de voz que /preguntas
+    let voiceEnabled       = (function () {
+        try { return localStorage.getItem('cirilo_voice_enabled') !== '0'; } catch (e) { return true; }
+    })();
     let muted              = false;
     let currentRecognition = null;
     let silenceTimer       = null;
@@ -476,12 +478,19 @@ document.addEventListener('DOMContentLoaded', function () {
     // ── Toggle de voz (TTS on/off) ──
     btnVoiceToggle.addEventListener('click', function () {
         voiceEnabled = !voiceEnabled;
+        try { localStorage.setItem('cirilo_voice_enabled', voiceEnabled ? '1' : '0'); } catch (e) {}
         btnVoiceToggle.innerHTML = voiceEnabled
             ? '<i class="fas fa-volume-up me-1"></i>Voz'
             : '<i class="fas fa-volume-mute me-1"></i>Silencio';
         btnVoiceToggle.classList.toggle('btn-outline-secondary', voiceEnabled);
         btnVoiceToggle.classList.toggle('btn-outline-warning', !voiceEnabled);
     });
+
+    if (!voiceEnabled) {
+        btnVoiceToggle.innerHTML = '<i class="fas fa-volume-mute me-1"></i>Silencio';
+        btnVoiceToggle.classList.remove('btn-outline-secondary');
+        btnVoiceToggle.classList.add('btn-outline-warning');
+    }
 
     // ── Botón Editar (cancela countdown y abre modal) ──
     btnEdit.addEventListener('click', cancelCountdown);
@@ -958,7 +967,7 @@ document.addEventListener('DOMContentLoaded', function () {
             row.innerHTML = `
                 <img src="{{ asset('resources/assistant.png') }}" class="bubble-avatar" alt="Cirilo">
                 <div>
-                    <div class="bubble bubble-assistant">${marked.parse(text)}</div>
+                    <div class="bubble bubble-assistant">${window.CiriloContent.renderMarkdown(text)}</div>
                     <div class="bubble-time bubble-time-left">${time}</div>
                 </div>`;
             chatArea.appendChild(row);

@@ -333,7 +333,7 @@
             const userMessage = document.createElement('div');
             userMessage.classList.add('message', 'user-message');
             userMessage.innerHTML = `
-                <div>${prompt}</div>
+                <div>${window.CiriloContent.plainText(prompt)}</div>
                 <div class="message-time">${getCurrentTime()}</div>
             `;
             responsesContainer.appendChild(userMessage);
@@ -370,7 +370,7 @@
                 // Eliminar el indicador de carga
                 responsesContainer.removeChild(loadingIndicator);
 
-                const imageUrl = response.data.image_url;
+                const imageUrl = window.CiriloContent.escapeHtml(window.CiriloContent.safeUrl(response.data.image_url));
                 console.log('URL de la imagen generada:', imageUrl);
 
                 // Crear tarjeta de imagen
@@ -380,7 +380,7 @@
                     <img src="${imageUrl}" alt="Imagen generada" class="img-fluid">
                     <div class="image-card-footer d-flex justify-content-between align-items-center">
                         <span class="text-muted small">${getCurrentTime()}</span>
-                        <a href="${imageUrl}" download="dalle_image.png" target="_blank" class="btn btn-sm btn-success">
+                        <a href="${imageUrl}" download="dalle_image.png" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-success">
                             <i class="fa-solid fa-download me-1"></i>Descargar
                         </a>
                     </div>
@@ -425,7 +425,7 @@
                 errorMessage.innerHTML = `
                     <div class="${isLimitError ? 'text-warning' : 'text-danger'}">
                         <i class="fa-solid fa-${isLimitError ? 'hourglass-end' : 'circle-exclamation'} me-2"></i>
-                        ${isLimitError ? '<strong>Límite Alcanzado:</strong>' : 'Error:'} ${errorMsg}
+                        ${isLimitError ? '<strong>Límite Alcanzado:</strong>' : 'Error:'} ${window.CiriloContent.escapeHtml(errorMsg)}
                     </div>
                     ${isLimitError ? '<div class="mt-2"><small class="text-muted">La página se recargará en 3 segundos...</small></div>' : ''}
                     <div class="message-time">${getCurrentTime()}</div>

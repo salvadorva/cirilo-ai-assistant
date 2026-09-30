@@ -6,7 +6,7 @@ use App\Models\Conversation;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use App\Support\AiLog as Log;
 
 class CreativeModeController extends Controller
 {
@@ -67,7 +67,7 @@ class CreativeModeController extends Controller
                 'Authorization' => 'Bearer '.$credentials['api_key'],
                 'Content-Type' => 'application/json',
             ])->post($credentials['base_url'].'/chat/completions', [
-                'model' => $provider === 'openai' ? 'gpt-4' : 'gpt-4o',
+                'model' => $provider === 'openai' ? config('ai.models.legacy_creative') : config('ai.models.vision'),
                 'messages' => [
                     ['role' => 'system', 'content' => 'Eres un asistente creativo que genera ideas inspiradoras, reflexiones profundas y conceptos innovadores.'],
                     ['role' => 'user', 'content' => $finalPrompt],
@@ -98,7 +98,7 @@ class CreativeModeController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Ocurrió un error: '.$e->getMessage(),
+                'message' => 'No se pudo generar el contenido. Intenta de nuevo más tarde.',
             ], 500);
         }
     }
@@ -189,9 +189,9 @@ class CreativeModeController extends Controller
                 : 'Eres un asistente creativo que genera respuestas concisas y directas.';
 
             // Determinar el modelo adecuado según el proveedor
-            $model = 'gpt-4o';
+            $model = config('ai.models.vision');
             if ($provider === 'grok') {
-                $model = 'grok-3';
+                $model = config('ai.models.creative_grok');
             }
 
             // Llamada a la API
@@ -227,7 +227,7 @@ class CreativeModeController extends Controller
 
                 return response()->json([
                     'success' => false,
-                    'message' => 'Error al generar el contenido creativo: '.$response->body(),
+                    'message' => 'No se pudo generar el contenido. Intenta de nuevo más tarde.',
                 ], 500);
             }
         } catch (\Exception $e) {
@@ -235,7 +235,7 @@ class CreativeModeController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Ocurrió un error: '.$e->getMessage(),
+                'message' => 'No se pudo generar el contenido. Intenta de nuevo más tarde.',
             ], 500);
         }
     }

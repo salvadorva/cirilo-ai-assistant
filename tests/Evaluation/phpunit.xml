@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Evaluaciones manuales F1-06b y F2 (agenda por herramientas). No forman parte de la suite normal.
+  F2: F2_TOOLS_MODE=dry|live con el filtro F2AgendaToolsEvaluationTest (ver docs/PLAN-MEJORAS-CIRILO.md, F2)
+  Ensayo:  F1_HUMAN_MODE=dry  vendor/bin/phpunit -c tests/Evaluation/phpunit.xml
+  Real:    F1_HUMAN_MODE=live vendor/bin/phpunit -c tests/Evaluation/phpunit.xml
+  A diferencia de phpunit.xml, no vacía OPENAI_API_KEY: usa la clave local existente.
+-->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="../../vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="../../vendor/autoload.php"
+         colors="true"
+>
+    <testsuites>
+        <testsuite name="Evaluation">
+            <file>F1HumanBaselineTest.php</file>
+            <file>F2AgendaToolsEvaluationTest.php</file>
+        </testsuite>
+    </testsuites>
+    <php>
+        <env name="APP_ENV" value="testing" force="true"/>
+        <env name="BCRYPT_ROUNDS" value="4"/>
+        <env name="CACHE_STORE" value="array" force="true"/>
+        <env name="DB_CONNECTION" value="sqlite" force="true"/>
+        <env name="DB_DATABASE" value=":memory:" force="true"/>
+        <env name="MAIL_MAILER" value="array" force="true"/>
+        <env name="GROK_API_KEY" value="" force="true"/>
+        <env name="LOG_CHANNEL" value="null" force="true"/>
+        <env name="QUEUE_CONNECTION" value="sync" force="true"/>
+        <env name="SESSION_DRIVER" value="array" force="true"/>
+        <env name="REMINDERS_HERMES_API_ENABLED" value="false" force="true"/>
+        <env name="REMINDERS_CONTEXTUAL_DISPATCH_ENABLED" value="false" force="true"/>
+        <env name="REMINDERS_ROUTINE_DISPATCH_ENABLED" value="false" force="true"/>
+    </php>
+</phpunit>

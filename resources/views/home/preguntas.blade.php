@@ -307,7 +307,6 @@
 <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/clipboard/dist/clipboard.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function() {
     // Configurar Axios para incluir el token CSRF en todas las peticiones
@@ -322,8 +321,11 @@
     const toggleVoiceBtn = document.getElementById('toggle-voice-btn');
     const suggestionBtns = document.querySelectorAll('.suggestion-btn');
         
-    // Estado de la voz
-    let voiceEnabled = true;
+    // Estado de la voz (F5-01): misma preferencia en /preguntas y /conversar
+    let voiceEnabled = (function () {
+        try { return localStorage.getItem('cirilo_voice_enabled') !== '0'; } catch (e) { return true; }
+    })();
+    let pendingController = null; // F5-05: respuesta en curso que se puede detener
     
 // Inicializar el array historial vacío o con el prompt personalizado si existe
 let historial = [];
@@ -332,9 +334,20 @@ let currentConversationId = null; // ID de la conversación activa en esta sesi�
     historial.push({ pregunta: @json($user->prompt), respuesta: "" });
 @endif
 
+ function renderVoiceButton() {
+        toggleVoiceBtn.innerHTML = voiceEnabled ? '<i class="fa-solid fa-volume-up"></i>' : '<i class="fa-solid fa-volume-mute"></i>';
+    }
+    renderVoiceButton();
+
         // Manejar el envío del formulario
     form.addEventListener('submit', function(e) {
         e.preventDefault();
+        // F5-05: mientras responde, el botón de enviar detiene la respuesta y el audio.
+        if (pendingController) {
+            pendingController.abort();
+            if (audioPlayer) audioPlayer.pause();
+            return;
+        }
        
             const prompt = promptInput.value.trim();
             if (!prompt) return;
@@ -361,9 +374,9 @@ let currentConversationId = null; // ID de la conversación activa en esta sesi�
         // Manejar el botón de activar/desactivar voz
         toggleVoiceBtn.addEventListener('click', function() {
             voiceEnabled = !voiceEnabled;
-            toggleVoiceBtn.innerHTML = voiceEnabled ? 
-                '<i class="fa-solid fa-volume-up"></i>' : 
-                '<i class="fa-solid fa-volume-mute"></i>';
+            try { localStorage.setItem('cirilo_voice_enabled', voiceEnabled ? '1' : '0'); } catch (e) {}
+            renderVoiceButton();
+            if (!voiceEnabled && audioPlayer) audioPlayer.pause();
             
             Swal.fire({
                 toast: true,
@@ -430,13 +443,25 @@ let currentConversationId = null; // ID de la conversación activa en esta sesi�
                 return null;
             }).filter(msg => msg !== null);
             
-            // Enviar la solicitud a la API con historial
-        axios.post('/generate-text', {
+            // F5: texto primero (streaming) y voz aparte. generateAudio: false porque el audio se
+            // pide después y solo si la voz está activa; así el texto nunca espera al audio.
+            const controller = new AbortController();
+            startPending(controller);
+            let preview = null;
+            let savedAgenda = null;
+            window.CiriloChat.send({
                 prompt: prompt,
                 history: conversationHistory,
-                conversation_id: currentConversationId
-            })
+                conversation_id: currentConversationId,
+                generateAudio: false
+            }, {
+                onDelta: text => { preview = showPreview(preview, typingContainer, text); },
+                onAgenda: agenda => { savedAgenda = agenda; }
+            }, { signal: controller.signal })
+            .then(data => ({ data }))
             .then(response => {
+                    stopPending();
+                    if (preview) preview.remove();
                     // Eliminar el indicador de escritura
                     responsesContainer.removeChild(typingContainer);
                 
@@ -478,6 +503,10 @@ let currentConversationId = null; // ID de la conversación activa en esta sesi�
                     assistantMessageContainer.appendChild(assistantMessage);
                     responsesContainer.appendChild(assistantMessageContainer);
                     assistantMessage.appendChild(assistantTime);
+                    window.CiriloFeedback.mount(assistantMessage, response.data.interaction_id);
+                    addListenButton(assistantMessage, respuesta);
+                    renderAgendaCard(response.data.agenda, assistantMessage);
+                    renderTaskCard(response.data.tasks, assistantMessage);
                     
                     // Scroll al final del contenedor
                     responsesContainer.scrollTop = responsesContainer.scrollHeight;
@@ -521,8 +550,14 @@ let currentConversationId = null; // ID de la conversación activa en esta sesi�
                     }
             })
             .catch(error => {
+                    stopPending();
+                    if (preview) preview.remove();
                     // Eliminar el indicador de escritura
-                    responsesContainer.removeChild(typingContainer);
+                    if (typingContainer.parentNode) responsesContainer.removeChild(typingContainer);
+                    if (error && error.aborted) {
+                        showStoppedNotice(error.agenda || savedAgenda);
+                        return;
+                    }
                     
                 console.error('Error:', error);
                     
@@ -570,15 +605,7 @@ let currentConversationId = null; // ID de la conversación activa en esta sesi�
         }
         
         function formatResponse(text) {
-            // Renderer personalizado para bloques de código con botón de copiar
-            const renderer = new marked.Renderer();
-            renderer.code = function({ text: code, lang }) {
-                const langLabel = lang ? `<span class="code-lang">${lang}</span>` : '';
-                return `<div class="code-block">${langLabel}<button class="copy-btn">Copiar</button><pre>${code}</pre></div>`;
-            };
-
-            marked.use({ renderer, gfm: true, breaks: true });
-            return marked.parse(text);
+            return window.CiriloContent.renderMarkdown(text);
         }
         
         function initCopyButtons() {
@@ -958,7 +985,7 @@ let currentConversationId = null; // ID de la conversación activa en esta sesi�
                     const recent = conversations.slice(0, 6);
                     container.innerHTML = recent.map(conv => {
                         const date = new Date(conv.updated_at).toLocaleDateString('es', { day: '2-digit', month: 'short' });
-                        const title = conv.title || 'Conversación sin título';
+                        const title = window.CiriloContent.escapeHtml(conv.title || 'Conversación sin título');
                         return `<div class="d-flex align-items-center border-bottom py-1 px-1 history-item-row" style="overflow:hidden">
                                     <a href="/historial?open=${conv.id}"
                                        class="d-flex justify-content-between align-items-center text-decoration-none text-dark flex-grow-1 me-1 py-1"
@@ -1017,6 +1044,143 @@ let currentConversationId = null; // ID de la conversación activa en esta sesi�
         }
 
         loadConversationHistory();
+
+        // F5-03: vista previa del texto mientras llega (texto plano; al terminar se muestra con formato).
+        function showPreview(preview, typingContainer, text) {
+            if (!preview) {
+                const container = document.createElement('div');
+                container.className = 'd-flex justify-content-start mb-3';
+                const bubble = document.createElement('div');
+                bubble.className = 'message assistant-message';
+                bubble.style.whiteSpace = 'pre-wrap';
+                container.appendChild(bubble);
+                responsesContainer.insertBefore(container, typingContainer);
+                typingContainer.style.display = 'none';
+                preview = container;
+            }
+            preview.firstChild.textContent = text;
+            responsesContainer.scrollTop = responsesContainer.scrollHeight;
+            return preview;
+        }
+
+        function startPending(controller) {
+            pendingController = controller;
+            const button = form.querySelector('button[type="submit"]');
+            button.dataset.label = button.innerHTML;
+            button.innerHTML = '<i class="fa-solid fa-stop"></i>';
+            button.title = 'Detener respuesta';
+        }
+
+        function stopPending() {
+            pendingController = null;
+            const button = form.querySelector('button[type="submit"]');
+            if (button.dataset.label) button.innerHTML = button.dataset.label;
+            button.title = '';
+        }
+
+        // F5-05: detener no deshace lo que ya se guardó; se avisa con la tarjeta del evento.
+        function showStoppedNotice(agenda) {
+            const container = document.createElement('div');
+            container.className = 'd-flex justify-content-start mb-3';
+            const bubble = document.createElement('div');
+            bubble.className = 'message assistant-message text-muted';
+            const saved = agenda && ['created', 'replayed', 'updated', 'cancelled'].includes(agenda.status);
+            bubble.textContent = saved
+                ? 'Detuviste la respuesta, pero la acción de agenda ya se había guardado:'
+                : 'Respuesta detenida.';
+            container.appendChild(bubble);
+            responsesContainer.appendChild(container);
+            if (saved) renderAgendaCard(agenda, bubble);
+            responsesContainer.scrollTop = responsesContainer.scrollHeight;
+        }
+
+        // F5-02: escuchar una respuesta bajo demanda, aunque la voz automática esté apagada.
+        function addListenButton(container, text) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn btn-sm btn-link p-0 me-2';
+            button.innerHTML = '<i class="fa-solid fa-volume-up"></i> Escuchar';
+            button.addEventListener('click', () => speakText(cleanForSpeech(text)));
+            container.appendChild(button);
+        }
+
+        function cleanForSpeech(text) {
+            return text
+                .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+                .replace(/https?:\/\/\S+/g, '')
+                .replace(/#{1,6}\s+/g, '')
+                .replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1')
+                .replace(/`[^`]+`/g, '')
+                .replace(/\s{2,}/g, ' ')
+                .trim()
+                .substring(0, 3000);
+        }
+
+        // F6-06: tarjeta del pendiente guardado o cambiado, con enlace para completarlo o editarlo en /hoy.
+        function renderTaskCard(tasks, container) {
+            const labels = { created: 'Pendiente guardado', duplicate: 'Ya estaba en tus pendientes', updated: 'Pendiente actualizado' };
+            if (!tasks || !labels[tasks.status] || !(tasks.items || []).length) return;
+            const card = document.createElement('div');
+            card.className = 'card border-0 bg-light mt-2';
+            const body = document.createElement('div');
+            body.className = 'card-body py-2 px-3 small';
+            const heading = document.createElement('div');
+            heading.className = 'fw-semibold mb-1';
+            heading.textContent = labels[tasks.status];
+            body.appendChild(heading);
+            tasks.items.forEach(task => {
+                const row = document.createElement('div');
+                row.className = 'd-flex justify-content-between align-items-center gap-2';
+                const text = document.createElement('span');
+                const states = { open: '', done: ' · hecho', postponed: ' · pospuesto', dismissed: ' · descartado' };
+                text.textContent = task.title + (task.due_date ? ' · fecha límite ' + task.due_date : ' · sin fecha') + (states[task.status] || '');
+                const link = document.createElement('a');
+                link.href = '/hoy#tarea-' + encodeURIComponent(task.id);
+                link.className = 'text-nowrap';
+                link.textContent = 'Ver en Hoy';
+                row.append(text, link);
+                body.appendChild(row);
+            });
+            card.appendChild(body);
+            container.appendChild(card);
+        }
+
+        // F2-07: tarjeta con lo que realmente quedó en la agenda (datos del servidor, no del texto del modelo).
+        function renderAgendaCard(agenda, container) {
+            if (!agenda) return;
+            const labels = { created: 'Agendado', replayed: 'Agendado', duplicate: 'Ya estaba en tu agenda', updated: 'Actualizado', cancelled: 'Cancelado' };
+            const events = labels[agenda.status] ? (agenda.events || []) : (agenda.status === 'needs_clarification' ? (agenda.candidates || []) : []);
+            if (!events.length) return;
+
+            const card = document.createElement('div');
+            card.className = 'card border-0 bg-light mt-2';
+            const body = document.createElement('div');
+            body.className = 'card-body py-2 px-3 small';
+            const heading = document.createElement('div');
+            heading.className = 'fw-semibold mb-1';
+            heading.textContent = labels[agenda.status] || '¿Cuál de estos?';
+            body.appendChild(heading);
+
+            events.forEach(ev => {
+                const start = new Date(ev.start);
+                const row = document.createElement('div');
+                row.className = 'd-flex justify-content-between align-items-center gap-2';
+                const text = document.createElement('span');
+                const when = start.toLocaleDateString('es-GT', { weekday: 'long', day: 'numeric', month: 'long' })
+                    + (ev.all_day ? ' · todo el día' : ' · ' + start.toLocaleTimeString('es-GT', { hour: '2-digit', minute: '2-digit' }));
+                text.textContent = ev.title + ' — ' + when + (ev.location ? ' · ' + ev.location : '')
+                    + (agenda.count > 1 && labels[agenda.status] ? ' (' + agenda.count + ' eventos en la serie)' : '');
+                const link = document.createElement('a');
+                const day = ev.start.substring(0, 10);
+                link.href = '/agenda?fecha=' + encodeURIComponent(day) + '&evento=' + encodeURIComponent(ev.id);
+                link.className = 'text-nowrap';
+                link.textContent = agenda.status === 'cancelled' ? 'Ver' : 'Ver o editar';
+                row.append(text, link);
+                body.appendChild(row);
+            });
+            card.appendChild(body);
+            container.appendChild(card);
+        }
 
         // Función para guardar la conversación automáticamente
         function autoSaveConversation() {

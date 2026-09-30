@@ -52,6 +52,11 @@ class TypeMasterController extends Controller
      */
     public function generateText(Request $request)
     {
+        $request->validate([
+            'level' => 'sometimes|in:beginner,intermediate,advanced',
+            'theme' => 'sometimes|in:general,tech,literature,science,business',
+            'length' => 'sometimes|in:short,medium,long',
+        ]);
         $level = $request->input('level', 'beginner');
         $theme = $request->input('theme', 'general');
         $length = $request->input('length', 'short');
@@ -82,14 +87,15 @@ class TypeMasterController extends Controller
         try {
             // Usar el mismo sistema de IA que el resto de la aplicación
             $aiController = new \App\Http\Controllers\AIController;
-            $aiRequest = new Request(['message' => $prompt]);
+            $aiRequest = new Request(['prompt' => $prompt, 'generateAudio' => false]);
+            $aiRequest->setUserResolver(fn () => $request->user());
             $response = $aiController->generateText($aiRequest);
             $data = json_decode($response->getContent(), true);
 
-            if ($data['success']) {
+            if ($response->isSuccessful() && isset($data['choices'][0]['message']['content'])) {
                 return response()->json([
                     'success' => true,
-                    'text' => $data['response'],
+                    'text' => $data['choices'][0]['message']['content'],
                     'level' => $level,
                     'theme' => $theme,
                     'length' => $length,
@@ -100,7 +106,7 @@ class TypeMasterController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'error' => 'Error al generar texto: '.$e->getMessage(),
+                'error' => 'No se pudo generar el texto. Puedes usar el texto de práctica alternativo.',
                 'fallback_text' => $this->getFallbackText($level),
             ]);
         }

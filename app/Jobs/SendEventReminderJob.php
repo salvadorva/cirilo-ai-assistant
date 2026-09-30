@@ -21,9 +21,16 @@ class SendEventReminderJob implements ShouldQueue
      *
      * @return void
      */
+    /**
+     * Hora de inicio al encolar. Si el evento se movió, el job ya no aplica. Los jobs encolados antes
+     * de este cambio no la tienen y tampoco envían: los avisos los gestiona agenda:schedule-notifications (F3).
+     */
+    protected ?string $scheduledStart = null;
+
     public function __construct(CalendarEvent $event)
     {
         $this->event = $event;
+        $this->scheduledStart = $event->start_date?->toIso8601String();
     }
 
     /**
@@ -37,6 +44,10 @@ class SendEventReminderJob implements ShouldQueue
         $event = CalendarEvent::find($this->event->id);
 
         if (! $event || $event->status === 'cancelled') {
+            return;
+        }
+
+        if ($this->scheduledStart === null || $event->start_date?->toIso8601String() !== $this->scheduledStart) {
             return;
         }
 

@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use App\Support\AiLog as Log;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -44,21 +44,8 @@ class TtsService
         }
 
         try {
-            $response = Http::timeout(120)
-                ->retry(3, 100)
-                ->withHeaders([
-                    'Authorization' => 'Bearer '.config('services.openai.api_key'),
-                    'Content-Type' => 'application/json',
-                ])->post('https://api.openai.com/v1/audio/speech', [
-                    'model' => 'tts-1',
-                    'input' => mb_convert_encoding($text, 'UTF-8', 'auto'),
-                    'voice' => $voice,
-                    'output_format' => 'mp3',
-                ]);
-
-            if ($response->failed()) {
-                Log::error('[TTS] Error de OpenAI TTS: '.$response->status().' '.$response->body());
-
+            $audio = $this->synthesize($text, $voice, 120, 3);
+            if ($audio === null) {
                 return null;
             }
 
@@ -69,7 +56,7 @@ class TtsService
                 Storage::disk('public')->makeDirectory($directory);
             }
 
-            Storage::disk('public')->put($fileName, $response->body());
+            Storage::disk('public')->put($fileName, $audio);
 
             return Storage::disk('public')->url($fileName);
         } catch (\Throwable $e) {
@@ -77,5 +64,36 @@ class TtsService
 
             return null;
         }
+    }
+
+    /**
+     * Devuelve los bytes MP3 sin guardarlos en ningún disco, o null si falla.
+     * Lo usan los recordatorios contextuales para guardar audio privado.
+     */
+    public function synthesize(string $text, string $voice = 'echo', int $timeout = 120, int $retries = 3): ?string
+    {
+        if (! in_array($voice, self::ALLOWED_VOICES, true)) {
+            $voice = 'echo';
+        }
+
+        $response = Http::timeout($timeout)
+            ->retry($retries, 100, throw: false)
+            ->withHeaders([
+                'Authorization' => 'Bearer '.config('services.openai.api_key'),
+                'Content-Type' => 'application/json',
+            ])->post('https://api.openai.com/v1/audio/speech', [
+                'model' => config('ai.models.tts'),
+                'input' => mb_convert_encoding($text, 'UTF-8', 'auto'),
+                'voice' => $voice,
+                'output_format' => 'mp3',
+            ]);
+
+        if ($response->failed()) {
+            Log::error('[TTS] Error de OpenAI TTS: '.$response->status());
+
+            return null;
+        }
+
+        return $response->body();
     }
 }

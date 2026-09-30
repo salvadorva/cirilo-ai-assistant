@@ -28,7 +28,21 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class ApiUsageLog extends Model
 {
+    protected static function booted(): void
+    {
+        static::saving(function (self $log) {
+            $log->prompt = null;
+            $log->ip_address = null;
+            $log->user_agent = null;
+            $log->metadata = \App\Support\AiLog::metadata($log->metadata ?? []);
+            if ($log->error_message !== null) {
+                $log->error_message = 'provider_request_failed';
+            }
+        });
+    }
+
     protected $fillable = [
+        'interaction_id', 'stage', 'cost_status', 'pricing_date',
         'user_id',
         'api_provider',
         'api_type',
@@ -48,7 +62,7 @@ class ApiUsageLog extends Model
 
     protected $casts = [
         'metadata' => 'array',
-        'estimated_cost' => 'decimal:6',
+        'estimated_cost' => 'decimal:8',
     ];
 
     /**
@@ -94,38 +108,9 @@ class ApiUsageLog extends Model
     /**
      * Calcular costo estimado basado en tokens y modelo
      */
-    public static function calculateCost(string $model, int $promptTokens, int $completionTokens): float
+    public static function calculateCost(string $model, int $promptTokens, int $completionTokens): ?float
     {
-        // Precios aproximados por 1K tokens (actualizar según precios reales)
-        $pricing = [
-            'gpt-4o' => ['prompt' => 0.005, 'completion' => 0.015],
-            'gpt-4o-mini' => ['prompt' => 0.00015, 'completion' => 0.0006],
-            'gpt-3.5-turbo' => ['prompt' => 0.0015, 'completion' => 0.002],
-            'dall-e-3' => ['per_image' => 0.04], // retirado 2026-05-12, queda por logs históricos
-            'gpt-image-1' => ['per_image' => 0.042], // 1024x1024 quality=medium (low: 0.011, high: 0.167)
-            'tts-1' => ['per_1k_chars' => 0.015],
-            'whisper-1' => ['per_minute' => 0.006],
-        ];
-
-        if (str_contains($model, 'gpt-image')) {
-            return $pricing['gpt-image-1']['per_image'] ?? 0;
-        }
-
-        if (str_contains($model, 'dall-e')) {
-            return $pricing['dall-e-3']['per_image'] ?? 0;
-        }
-
-        if (str_contains($model, 'tts')) {
-            // Estimación: ~1 token = ~4 caracteres
-            $chars = $promptTokens * 4;
-
-            return ($chars / 1000) * ($pricing['tts-1']['per_1k_chars'] ?? 0);
-        }
-
-        $modelPricing = $pricing[$model] ?? ['prompt' => 0, 'completion' => 0];
-        $promptCost = ($promptTokens / 1000) * $modelPricing['prompt'];
-        $completionCost = ($completionTokens / 1000) * $modelPricing['completion'];
-
-        return round($promptCost + $completionCost, 6);
+        return app(\App\Services\AiPricing::class)->estimate('openai', $model,
+            ['input_tokens' => $promptTokens, 'output_tokens' => $completionTokens])['estimated_cost'];
     }
 }

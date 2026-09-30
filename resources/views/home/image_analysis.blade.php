@@ -342,7 +342,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 // Mostrar resultado - asegurar que el texto se muestra correctamente
                 if (analysisText) {
-                    analysisContent.innerHTML = analysisText.replace(/\n/g, '<br>');
+                    analysisContent.innerHTML = window.CiriloContent.renderMarkdown(analysisText);
                     
                     // Cambiar visibilidad
                     analysisLoading.classList.add('d-none');
@@ -381,8 +381,8 @@ document.addEventListener('DOMContentLoaded', function() {
             analysisContent.innerHTML = `
                 <div class="alert alert-danger" role="alert">
                     <i class="fa-solid fa-exclamation-triangle me-2"></i>
-                    <strong>Error:</strong> ${errorMessage}
-                    ${errorDetails ? `<p class="mt-2 mb-0"><small>${errorDetails}</small></p>` : ''}
+                    <strong>Error:</strong> ${window.CiriloContent.escapeHtml(errorMessage)}
+                    ${errorDetails ? `<p class="mt-2 mb-0"><small>${window.CiriloContent.escapeHtml(errorDetails)}</small></p>` : ''}
                 </div>
             `;
             
@@ -551,4 +551,4 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 </script>
-@endpush 
+@endpush

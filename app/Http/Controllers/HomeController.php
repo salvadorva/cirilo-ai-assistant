@@ -98,7 +98,15 @@ class HomeController extends Controller
         }
         // --- Fin Mensaje Cirilo ---
 
-        return view('home.index', compact('currentDate', 'user', 'role', 'progress', 'hasEngagementData', 'ciriloMessage'));
+        // F6-01: compromisos y pendientes de hoy al inicio (datos reales; no dependen del mensaje generado).
+        try {
+            $today = app(\App\Services\Tasks\TodaySummary::class)->for($user);
+        } catch (\Throwable $e) {
+            report($e);
+            $today = null;
+        }
+
+        return view('home.index', compact('currentDate', 'user', 'role', 'progress', 'hasEngagementData', 'ciriloMessage', 'today'));
     }
 
     /**

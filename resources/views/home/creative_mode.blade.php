@@ -454,7 +454,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 currentResult = data.content;
                 
                 // Mostrar resultado
-                resultContent.innerHTML = data.content.replace(/\n/g, '<br>');
+                resultContent.innerHTML = window.CiriloContent.renderMarkdown(data.content);
                 
                 // Cambiar visibilidad
                 loadingIndicator.classList.add('d-none');
@@ -470,7 +470,7 @@ document.addEventListener('DOMContentLoaded', function() {
             resultContent.innerHTML = `
                 <div class="alert alert-danger" role="alert">
                     <i class="fa-solid fa-exclamation-triangle me-2"></i>
-                    ${error.message || 'Ocurrió un error al generar contenido. Por favor, intenta de nuevo.'}
+                    ${window.CiriloContent.escapeHtml(error.message || 'Ocurrió un error al generar contenido. Por favor, intenta de nuevo.')}
                 </div>
             `;
         }
@@ -686,4 +686,4 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 </script>
-@endpush 
+@endpush

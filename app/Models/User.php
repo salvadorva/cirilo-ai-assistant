@@ -87,6 +87,9 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at'              => 'datetime',
+            'memory_extraction_enabled'      => 'boolean',
+            'daily_summary_enabled'          => 'boolean',
+            'daily_summary_last_sent_on'     => 'date',
             'password'                       => 'hashed',
             'nextcloud_password'             => 'encrypted',
             'telegram_notifications_enabled' => 'boolean',

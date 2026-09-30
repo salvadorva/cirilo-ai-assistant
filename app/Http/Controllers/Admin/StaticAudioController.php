@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\StaticAudio;
 use App\Services\AudioCacheService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
+use App\Support\AiLog as Log;
 use Illuminate\Support\Facades\Storage;
 
 class StaticAudioController extends Controller
@@ -287,9 +287,9 @@ class StaticAudioController extends Controller
      */
     public function getWelcomeAudio()
     {
-        $welcomeText = 'Hola, me llamo Cirílo! Estoy aquí para ayudarte con todo lo que necesites. Puedes hacerme preguntas en el Asistente Virtual, pedirme que genere imágenes creativas, analizar imágenes que subas, usar el modo creativo para inspirarte o revisar tu historial de conversaciones. ¡También puedes hablarme usando el micrófono!';
-
-        $audio = $this->audioCacheService->getCachedAudio('welcome', null, $welcomeText);
+        // Public lookup must never generate paid audio on a cache miss.
+        // Generation remains an authenticated, rate-limited admin operation.
+        $audio = StaticAudio::where('type', 'welcome')->whereNull('index')->approved()->active()->first();
 
         if ($audio && $audio->audioFileExists()) {
             return response()->json([

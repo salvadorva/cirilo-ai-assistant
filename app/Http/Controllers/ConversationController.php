@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Conversation;
-use App\Models\Message;
+use App\Services\ConversationHistory;
 use App\Services\ConversationSummaryService;
 use App\Services\MemoryService;
 use Illuminate\Http\Request;
@@ -54,22 +54,12 @@ class ConversationController extends Controller
         $conversation->content   = $request->content;
         $conversation->save();
 
-        // Guardar mensajes individuales
+        // F4-01: los mensajes van a la tabla messages y content se reconstruye desde ella
+        // (GuardAiRequests ya normalizó content a {messages}).
         $contentData = json_decode($request->content, true);
-        $messages    = $contentData['messages'] ?? $contentData;
-        foreach ($messages as $msg) {
-            if (isset($msg['role']) && isset($msg['content'])) {
-                $message                  = new Message;
-                $message->conversation_id = $conversation->id;
-                $message->role            = $msg['role'];
-                $message->content         = $msg['content'];
-                $message->image_path      = $msg['image_path'] ?? null;
-                $message->save();
-            }
-        }
+        $messages    = ConversationHistory::mergeFromClient($conversation, (array) ($contentData['messages'] ?? []));
 
-        $this->summaryService->maybeSummarize($conversation, $messages);
-        $this->summaryService->summarizeOpenConversations(Auth::id(), $conversation->id);
+        $this->summarizeAfterResponse($conversation, $messages, true);
 
         return response()->json([
             'success'         => true,
@@ -93,17 +83,33 @@ class ConversationController extends Controller
             return response()->json(['success' => false, 'message' => 'Sin permiso.'], 403);
         }
 
-        $conversation->content = $request->content;
-        $conversation->save();
-
         $contentData = json_decode($request->content, true);
-        $messages    = $contentData['messages'] ?? [];
-        $this->summaryService->maybeSummarize($conversation, $messages);
+        $messages    = ConversationHistory::mergeFromClient($conversation, (array) ($contentData['messages'] ?? []));
+        $this->summarizeAfterResponse($conversation, $messages);
 
         return response()->json([
             'success'         => true,
             'conversation_id' => $conversation->id,
         ]);
+    }
+
+    /**
+     * F5-06: los resúmenes (una llamada al modelo por conversación) corren después de enviar la
+     * respuesta; un fallo no afecta al guardado.
+     */
+    private function summarizeAfterResponse(Conversation $conversation, array $messages, bool $includeOpen = false): void
+    {
+        $userId = Auth::id();
+        app()->terminating(function () use ($conversation, $messages, $includeOpen, $userId) {
+            try {
+                $this->summaryService->maybeSummarize($conversation, $messages);
+                if ($includeOpen) {
+                    $this->summaryService->summarizeOpenConversations($userId, $conversation->id);
+                }
+            } catch (\Throwable $e) {
+                \App\Support\AiLog::warning('Resumen de conversación no generado', ['conversation_id' => $conversation->id, 'error' => $e->getMessage()]);
+            }
+        });
     }
 
     /**

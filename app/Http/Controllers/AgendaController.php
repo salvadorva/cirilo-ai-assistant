@@ -3,12 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\CalendarEvent;
+use App\Services\Agenda\AgendaResult;
+use App\Services\Agenda\AgendaService;
+use App\Services\Agenda\AgendaValidationException;
+use App\Services\Agenda\EventNotifier;
 use App\Services\NextcloudCalendarService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use App\Support\AiLog as Log;
 use Illuminate\Support\Facades\Validator;
 use OpenAI\Laravel\Facades\OpenAI;
 
@@ -51,6 +55,8 @@ class AgendaController extends Controller
                 'location'                => $event->location ?? '',
                 'color'                   => $event->color ?? '#3788d8',
                 'reminder_minutes_before' => (int) ($event->reminder_minutes_before ?? 0),
+                // F3: estado por canal; «aceptado» es del proveedor, no confirma que se haya leído.
+                'notifications'           => EventNotifier::summary($event),
             ];
 
             return response()->json([
@@ -71,113 +77,82 @@ class AgendaController extends Controller
     /**
      * Actualiza un evento existente
      */
-    public function update(Request $request, $id)
+    public function update(Request $request, $id, AgendaService $agenda)
     {
+        $validator = Validator::make($request->all(), [
+            'title' => 'required|string|max:255',
+            'start_date' => 'required|date',
+            'end_date' => 'nullable|date',
+            'start_time' => 'nullable|date_format:H:i',
+            'end_time' => 'nullable|date_format:H:i',
+            'all_day' => 'boolean',
+            'description' => 'nullable|string',
+            'category' => 'nullable|string',
+            'reminder_minutes_before' => 'nullable|integer|min:0|max:10080',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'message' => 'Datos inválidos', 'errors' => $validator->errors()], 422);
+        }
+
+        $event = $agenda->owned(Auth::user(), $id);
+        if (! $event) {
+            return response()->json(['success' => false, 'message' => 'No se pudo actualizar el evento'], 404);
+        }
+
+        $tz = config('app.timezone');
+        $allDay = (bool) $request->boolean('all_day');
+        $start = Carbon::parse($request->start_date, $tz);
+        if (! $allDay && $request->start_time) {
+            [$hours, $minutes] = explode(':', $request->start_time);
+            $start->setTime((int) $hours, (int) $minutes);
+        }
+        $end = null;
+        if ($request->end_date) {
+            $end = Carbon::parse($request->end_date, $tz);
+            if (! $allDay && $request->end_time) {
+                [$hours, $minutes] = explode(':', $request->end_time);
+                $end->setTime((int) $hours, (int) $minutes);
+            }
+        }
+
+        $changes = ['title' => $request->title, 'description' => $request->description ?? '', 'category' => $request->category ?? 'general',
+            'start' => $start, 'end' => $end, 'all_day' => $allDay];
+        if ($request->reminder_minutes_before !== null) {
+            $changes['reminder_minutes_before'] = (int) $request->reminder_minutes_before;
+        }
+
         try {
-            // Validar datos
-            $validator = Validator::make($request->all(), [
-                'title' => 'required|string|max:255',
-                'start_date' => 'required|date',
-                'end_date' => 'nullable|date',
-                'all_day' => 'boolean',
-                'description' => 'nullable|string',
-                'category' => 'nullable|string',
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Datos inválidos',
-                    'errors' => $validator->errors(),
-                ], 422);
-            }
-
-            // Obtener el evento del usuario actual
-            $event = CalendarEvent::where('id', $id)
-                ->where('user_id', Auth::id())
-                ->firstOrFail();
-
-            // Preparar fechas
-            $startDate = Carbon::parse($request->start_date);
-            if (! $request->all_day && $request->start_time) {
-                [$hours, $minutes] = explode(':', $request->start_time);
-                $startDate->setHour((int) $hours)->setMinute((int) $minutes)->setSecond(0);
-            }
-
-            $endDate = null;
-            if ($request->end_date) {
-                $endDate = Carbon::parse($request->end_date);
-                if (! $request->all_day && $request->end_time) {
-                    [$hours, $minutes] = explode(':', $request->end_time);
-                    $endDate->setHour((int) $hours)->setMinute((int) $minutes)->setSecond(0);
-                }
-            }
-
-            // Actualizar evento
-            $event->title = $request->title;
-            $event->description = $request->description;
-            $event->start_date = $startDate;
-            $event->end_date = $endDate;
-            $event->all_day = $request->all_day ?? false;
-            $event->category = $request->category ?? 'general';
-            $event->reminder_minutes_before = $request->reminder_minutes_before !== null ? (int) $request->reminder_minutes_before : $event->reminder_minutes_before;
-            $event->notified = false; // Resetear para que se envíe el nuevo recordatorio
-            $event->save();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Evento actualizado correctamente',
-                'event' => $event,
-            ]);
-
-        } catch (\Exception $e) {
+            $event = $agenda->update(Auth::user(), $event, $changes);
+        } catch (AgendaValidationException $e) {
+            return response()->json(['success' => false, 'message' => 'Datos inválidos: '.$e->getMessage()], 422);
+        } catch (\Throwable $e) {
             Log::error('Error al actualizar evento: '.$e->getMessage());
 
-            return response()->json([
-                'success' => false,
-                'message' => 'No se pudo actualizar el evento',
-            ], 500);
+            return response()->json(['success' => false, 'message' => 'No se pudo actualizar el evento'], 500);
         }
+
+        return response()->json(['success' => true, 'message' => 'Evento actualizado correctamente', 'event' => $event]);
     }
 
     /**
      * Elimina un evento existente
      */
-    public function destroy($id)
+    public function destroy($id, AgendaService $agenda)
     {
+        $event = $agenda->owned(Auth::user(), $id);
+        if (! $event) {
+            return response()->json(['success' => false, 'message' => 'No se pudo eliminar el evento'], 404);
+        }
+
         try {
-            // Obtener el evento del usuario actual
-            $event = CalendarEvent::where('id', $id)
-                ->where('user_id', Auth::id())
-                ->firstOrFail();
-
-            // Si estaba sincronizado con Nextcloud, eliminarlo también allá
-            if ($event->nextcloud_synced) {
-                $user = Auth::user();
-                if ($user->hasNextcloud()) {
-                    try {
-                        (new NextcloudCalendarService($user))->deleteEvent($event);
-                    } catch (\Exception $e) {
-                        Log::warning('No se pudo eliminar evento de Nextcloud: '.$e->getMessage());
-                    }
-                }
-            }
-
-            $event->delete();
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Evento eliminado correctamente',
-            ]);
-
-        } catch (\Exception $e) {
+            $agenda->delete(Auth::user(), $event);
+        } catch (\Throwable $e) {
             Log::error('Error al eliminar evento: '.$e->getMessage());
 
-            return response()->json([
-                'success' => false,
-                'message' => 'No se pudo eliminar el evento',
-            ], 500);
+            return response()->json(['success' => false, 'message' => 'No se pudo eliminar el evento'], 500);
         }
+
+        return response()->json(['success' => true, 'message' => 'Evento eliminado correctamente']);
     }
 
     /**
@@ -464,93 +439,69 @@ class AgendaController extends Controller
     }
 
     /**
-     * Guarda un evento en la base de datos
-     */
-    protected function saveEvent($eventData)
-    {
-        $event = new CalendarEvent;
-        $event->title = $eventData['title'] ?? '';
-        $event->description = $eventData['description'] ?? '';
-        $event->start_date = Carbon::parse($eventData['start_date'] ?? '');
-        $event->end_date = Carbon::parse($eventData['end_date'] ?? '');
-        $event->all_day = $eventData['all_day'] ?? false;
-        $event->category = $eventData['category'] ?? '';
-        $event->location = $eventData['location'] ?? '';
-        $event->color = $eventData['color'] ?? '';
-        $event->reminder_minutes_before = $eventData['reminder_minutes_before'] ?? 10;
-        $event->user_id = auth()->id();
-        $event->save();
-
-        return $event;
-    }
-
-    /**
      * Almacena un nuevo evento desde el formulario
      *
      * @return \Illuminate\Http\JsonResponse
      */
-    public function store(Request $request)
+    public function store(Request $request, AgendaService $agenda)
     {
-        try {
-            $data = $request->all();
-            Log::info('Datos recibidos para crear evento:', ['data' => $data]);
-
-            // Validar datos básicos
-            $validator = Validator::make($data, [
-                'title' => 'required|string|max:255',
-                'start_date' => 'required|date',
-                'end_date' => 'nullable|date',
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Datos inválidos: '.$validator->errors()->first(),
-                ], 422);
-            }
-
-            // Preparar datos para guardar
-            $eventData = [
-                'title' => $data['title'],
-                'description' => $data['description'] ?? '',
-                'category' => $data['category'] ?? 'general',
-                'location' => $data['location'] ?? '',
-                'color' => $data['color'] ?? '#3788d8',
-                'all_day' => isset($data['all_day']) && ($data['all_day'] === 'on' || $data['all_day'] === true || $data['all_day'] === 1 || $data['all_day'] === '1'),
-                'reminder_minutes_before' => isset($data['reminder_minutes_before']) ? (int) $data['reminder_minutes_before'] : 10,
-            ];
-
-            // Manejar fechas y horas
-            if (isset($data['all_day']) && ($data['all_day'] === 'on' || $data['all_day'] === true || $data['all_day'] === 1 || $data['all_day'] === '1')) {
-                // Para eventos de todo el día, solo usamos la fecha
-                $eventData['start_date'] = $data['start_date'];
-                $eventData['end_date'] = $data['end_date'] ?? $data['start_date'];
-            } else {
-                // Para eventos con hora específica, combinamos fecha y hora
-                $startTime = $data['start_time'] ?? '00:00';
-                $endTime = $data['end_time'] ?? '23:59';
-
-                $eventData['start_date'] = $data['start_date'].' '.$startTime;
-                $eventData['end_date'] = ($data['end_date'] ?? $data['start_date']).' '.$endTime;
-            }
-
-            // Guardar evento
-            $event = $this->saveEvent($eventData);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Evento creado correctamente',
-                'event' => $event,
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Error al crear evento: '.$e->getMessage());
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Error al crear evento: '.$e->getMessage(),
-            ], 500);
+        $validator = Validator::make($request->all(), [
+            'title' => 'required|string|max:255',
+            'start_date' => 'required|date',
+            'end_date' => 'nullable|date',
+            'start_time' => 'nullable|date_format:H:i',
+            'end_time' => 'nullable|date_format:H:i',
+            'reminder_minutes_before' => 'nullable|integer|min:0|max:10080',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'message' => 'Datos inválidos: '.$validator->errors()->first()], 422);
         }
+
+        $key = $request->header('Idempotency-Key');
+        $result = $agenda->create(Auth::user(), $this->formAttributes($request) + ['reminder_minutes_before' => 10], is_string($key) && $key !== '' ? mb_substr($key, 0, 100) : null, 'web');
+
+        if ($result->status === AgendaResult::INVALID) {
+            return response()->json(['success' => false, 'message' => 'Datos inválidos: '.$result->message], 422);
+        }
+        if (! $result->persisted()) {
+            return response()->json(['success' => false, 'message' => 'No se pudo crear el evento. Intenta de nuevo más tarde.'],
+                $result->status === AgendaResult::CONFLICT ? 409 : 500);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => $result->status === AgendaResult::DUPLICATE ? 'Ese evento ya estaba en tu agenda' : 'Evento creado correctamente',
+            'event' => $result->first(),
+            'duplicate' => $result->status === AgendaResult::DUPLICATE,
+        ]);
+    }
+
+    /**
+     * Formulario web (fecha + hora por separado, «todo el día») → entrada de AgendaService.
+     */
+    private function formAttributes(Request $request): array
+    {
+        $allDay = in_array($request->input('all_day'), ['on', true, 1, '1', 'true'], true);
+        $startDate = Carbon::parse($request->input('start_date'))->format('Y-m-d');
+        $endDate = $request->filled('end_date') ? Carbon::parse($request->input('end_date'))->format('Y-m-d') : $startDate;
+        $tz = config('app.timezone');
+
+        $attributes = [
+            'title' => $request->input('title'),
+            'description' => $request->input('description') ?? '',
+            'category' => $request->input('category') ?: 'general',
+            'location' => $request->input('location') ?? '',
+            'color' => $request->input('color') ?: '#3788d8',
+            'all_day' => $allDay,
+            'start' => Carbon::parse($startDate.' '.($allDay ? '00:00' : ($request->input('start_time') ?: '00:00')), $tz),
+            // Como antes: sin hora de fin, el evento dura hasta las 23:59 de su último día.
+            'end' => Carbon::parse($endDate.' '.($allDay ? '00:00' : ($request->input('end_time') ?: '23:59')), $tz),
+        ];
+        if ($request->filled('reminder_minutes_before')) {
+            $attributes['reminder_minutes_before'] = (int) $request->input('reminder_minutes_before');
+        }
+
+        return $attributes;
     }
 
     /**
@@ -794,7 +745,7 @@ class AgendaController extends Controller
                 'Authorization' => 'Bearer '.$apiKey,
                 'Content-Type' => 'application/json',
             ])->post('https://api.openai.com/v1/chat/completions', [
-                'model' => 'gpt-4o',
+                'model' => config('ai.models.vision'),
                 'messages' => $messages,
                 'max_tokens' => 500,
             ]);
@@ -825,7 +776,7 @@ class AgendaController extends Controller
                 'Authorization' => 'Bearer '.$apiKey,
                 'Content-Type' => 'application/json',
             ])->post('https://api.openai.com/v1/audio/speech', [
-                'model' => 'tts-1',
+                'model' => config('ai.models.tts'),
                 'input' => $text,
                 'voice' => 'echo',
                 'output_format' => 'mp3',
@@ -868,7 +819,7 @@ class AgendaController extends Controller
             ]);
 
             if ($validator->fails()) {
-                \Log::error('Validación fallida', ['errors' => $validator->errors()]);
+                \App\Support\AiLog::error('Validación fallida', ['errors' => $validator->errors()]);
 
                 return response()->json([
                     'success' => false,
@@ -879,7 +830,7 @@ class AgendaController extends Controller
             }
 
             $voiceText = $request->voice_command;
-            \Log::info('Procesando comando de voz:', ['text' => $voiceText]);
+            \App\Support\AiLog::info('Procesando comando de voz:', ['text' => $voiceText]);
 
             // Detectar intención
             $response = ['intent' => $this->detectIntent($voiceText)];
@@ -887,12 +838,12 @@ class AgendaController extends Controller
             // Procesar según la intención
             if ($response['intent'] === 'create_event') {
                 $response['partial_event'] = $this->parseEventDetails($voiceText);
-                \Log::info('Evento parseado:', $response['partial_event']);
+                \App\Support\AiLog::info('Evento parseado:', $response['partial_event']);
             } elseif ($response['intent'] === 'query_events') {
                 $dateRange = $this->extractDateRangeFromQuery($voiceText);
                 $events = $this->getEventsInRange($dateRange['start'], $dateRange['end']);
                 $response['events'] = $events;
-                \Log::info('Eventos encontrados para consulta de voz:', ['count' => $events->count()]);
+                \App\Support\AiLog::info('Eventos encontrados para consulta de voz:', ['count' => $events->count()]);
             }
 
             // Generar respuesta de voz
@@ -900,14 +851,14 @@ class AgendaController extends Controller
             try {
                 $response['audio_url'] = $this->generateAudio($response['voice_message']);
             } catch (\Exception $e) {
-                \Log::error('Error generando audio', ['error' => $e->getMessage()]);
+                \App\Support\AiLog::error('Error generando audio', ['error' => $e->getMessage()]);
                 $response['audio_url'] = null;
             }
 
             return response()->json(array_merge(['success' => true], $response));
 
         } catch (\Exception $e) {
-            \Log::error('Error procesando comando de voz', [
+            \App\Support\AiLog::error('Error procesando comando de voz', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
@@ -916,7 +867,7 @@ class AgendaController extends Controller
                 'success' => false,
                 'message' => 'Error al procesar el comando de voz',
                 'voice_message' => 'Lo siento, ocurrió un error al procesar tu solicitud.',
-                'error' => $e->getMessage(),
+                'error' => 'voice_request_failed',
             ], 500);
         }
     }
@@ -1176,7 +1127,7 @@ class AgendaController extends Controller
     protected function parseEventDetails($text)
     {
         // Log de entrada
-        \Log::info('Parseando detalles de evento desde texto:', ['text' => $text]);
+        \App\Support\AiLog::info('Parseando detalles de evento desde texto:', ['text' => $text]);
 
         // Fecha por defecto es hoy en formato Y-m-d
         $eventInfo = ['title' => 'Evento sin nombre', 'date' => date('Y-m-d'), 'time' => ''];
@@ -1227,7 +1178,7 @@ class AgendaController extends Controller
             $eventInfo['time'] = sprintf('%02d:%02d', $hour, $minute);
         }
 
-        \Log::info('Resultado de parseo:', $eventInfo);
+        \App\Support\AiLog::info('Resultado de parseo:', $eventInfo);
 
         return $eventInfo;
     }

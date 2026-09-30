@@ -24,12 +24,14 @@ class UserProfileFact extends Model
         'value',
         'confidence',
         'source_type',
+        'source_conversation_id',
         'last_mentioned_at',
     ];
 
     protected $casts = [
         'last_mentioned_at' => 'datetime',
         'confidence'        => 'float',
+        'source_conversation_id' => 'integer',
     ];
 
     // Categorías core: siempre inyectadas en el system prompt

@@ -6,7 +6,7 @@ use App\Models\UserEnglishLevel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use App\Support\AiLog as Log;
 
 class TutorController extends Controller
 {
@@ -810,7 +810,7 @@ Responde SOLO con el JSON, sin texto adicional.";
                 'Authorization' => 'Bearer '.$credentials['api_key'],
                 'Content-Type' => 'application/json',
             ])->post('https://api.openai.com/v1/chat/completions', [
-                'model' => 'gpt-3.5-turbo',
+                'model' => config('ai.models.tutor'),
                 'messages' => [
                     [
                         'role' => 'system',

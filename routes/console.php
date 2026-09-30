@@ -55,8 +55,9 @@ Schedule::command('audio:clean')
     ->description('Limpiar archivos de audio no utilizados');
 
 // Agenda - Recordatorios de eventos
+// F3: cada minuto, porque ya no se adelantan avisos (antes: cada 5 min con 6 min de anticipación).
 Schedule::command('agenda:schedule-notifications')
-    ->everyFiveMinutes()
+    ->everyMinute()
     ->withoutOverlapping()
     ->runInBackground()
     ->description('Programar recordatorios de eventos del calendario');
@@ -67,3 +68,24 @@ Schedule::command('focus:send-messages')
     ->withoutOverlapping()
     ->runInBackground()
     ->description('Enviar mensajes de enfoque por voz según focus_slots');
+
+// Recordatorios contextuales y rutinas con despacho durable (RC2). No hace nada
+// mientras REMINDERS_*_DISPATCH_ENABLED estén apagados.
+Schedule::command('reminders:dispatch')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->description('Despacho durable de recordatorios (claim + lease + reintentos)');
+
+// Memoria (F4-03): resume conversaciones con mensajes nuevos inactivas 2h+. Estaba solo en
+// app/Console/Kernel.php, que Laravel 11 no lee. Tope de llamadas por corrida en el comando.
+Schedule::command('memory:summarize-stale')
+    ->hourly()
+    ->withoutOverlapping()
+    ->runInBackground()
+    ->description('Resumir conversaciones inactivas y extraer hechos del perfil');
+
+// F6-05: resumen del día opcional (cada usuario elige hora, canal y días; desactivado por defecto).
+Schedule::command('today:send-summary')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->description('Resumen diario de agenda y pendientes');

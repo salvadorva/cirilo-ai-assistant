@@ -8,7 +8,7 @@ use App\Traits\LogsApiUsage;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use App\Support\AiLog as Log;
 use Illuminate\Support\Facades\Storage;
 
 class ImageAnalysisController extends Controller
@@ -60,7 +60,7 @@ class ImageAnalysisController extends Controller
                 'Authorization' => 'Bearer '.$credentials['api_key'],
                 'Content-Type' => 'application/json',
             ])->post($credentials['base_url'].'/chat/completions', [
-                'model' => 'gpt-4o',
+                'model' => config('ai.models.vision'),
                 'messages' => [
                     [
                         'role' => 'user',
@@ -111,7 +111,7 @@ class ImageAnalysisController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Ocurrió un error: '.$e->getMessage(),
+                'message' => 'No se pudo analizar la imagen. Intenta de nuevo más tarde.',
             ], 500);
         }
     }

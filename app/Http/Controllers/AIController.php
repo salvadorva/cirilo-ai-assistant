@@ -2,13 +2,26 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Conversation;
+use App\Services\Agenda\AgendaDateRange;
+use App\Services\Agenda\AgendaIntent;
+use App\Services\Agenda\AgendaResult;
+use App\Services\Agenda\AgendaService;
+use App\Services\Agenda\AgendaTools;
+use App\Services\Agenda\ChatAgenda;
+use App\Services\ChatContext;
+use App\Services\Tasks\TaskIntent;
+use App\Services\Tasks\TaskService;
+use App\Services\ExplicitMemoryService;
 use App\Services\MemoryService;
+use App\Services\ImageQuotaService;
+use App\Support\ChatInput;
 use App\Traits\LogsApiUsage;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use App\Support\AiLog as Log;
 use Illuminate\Support\Facades\Storage;
 
 class AIController extends Controller
@@ -47,8 +60,15 @@ class AIController extends Controller
         }
     }
 
+    private function httpClient(array $config = []): Client
+    {
+        // Container resolution allows tests to block all provider traffic.
+        return app(\App\Services\AiTransport::class)->client($config);
+    }
+
     public function generateText(Request $request)
     {
+        ChatInput::validate($request);
         $user = auth()->user();
         $provider = $user->ai_provider ?? 'openai';
         $prompt = $request->input('prompt');
@@ -118,7 +138,7 @@ class AIController extends Controller
                         'Authorization' => 'Bearer '.$openaiCredentials['api_key'],
                         'Content-Type' => 'application/json',
                     ])->post($openaiCredentials['base_url'].'/audio/speech', [
-                        'model' => 'tts-1',
+                        'model' => config('ai.models.tts'),
                         'input' => $response,
                         'voice' => $voice,
                         'output_format' => 'mp3',
@@ -141,11 +161,11 @@ class AIController extends Controller
             return response()->json($data);
         }
 
-        // Limit history to last 10 messages to save tokens and context window
-        $maxHistory = 10;
-        if (count($history) > $maxHistory) {
-            $history = array_slice($history, -$maxHistory);
-        }
+        // F4-02: historial con presupuesto; sin historial del cliente se usan los mensajes guardados.
+        $activeConversation = ($user && $currentConversationId)
+            ? Conversation::where('user_id', $user->id)->find($currentConversationId)
+            : null;
+        $history = ChatContext::history(is_array($history) ? $history : [], $activeConversation, (string) $prompt);
 
         // Personalización de prompt según usuario y System Prompt
         $systemPrompt = "Eres un asistente virtual profesional, amigable y altamente eficiente. Tu objetivo principal es ayudar al usuario resolviendo sus dudas y completando tareas con precisión.\n\n";
@@ -175,7 +195,14 @@ class AIController extends Controller
 
         // Inyectar perfil del usuario y conversaciones recientes via MemoryService
         if ($user) {
-            $contextBlock = MemoryService::buildContextBlock($user->id, $currentConversationId);
+            // F4-08: «Llámame X» se guarda ya, sin esperar al resumen, y entra en este mismo turno.
+            try {
+                ExplicitMemoryService::capture($user->id, $prompt, $activeConversation?->id);
+            } catch (\Throwable $e) {
+                Log::warning('ExplicitMemoryService: no se pudo guardar la preferencia', ['user_id' => $user->id, 'error' => $e->getMessage()]);
+            }
+
+            $contextBlock = app(\App\Services\InteractionTracker::class)->measure('context', fn () => MemoryService::buildContextBlock($user->id, $currentConversationId, (string) $prompt));
             if ($contextBlock) {
                 $systemPrompt .= $contextBlock . "\n";
             }
@@ -207,117 +234,60 @@ class AIController extends Controller
                     $systemPrompt .= "El usuario pidió generar una imagen pero falló: {$errMsg}. ";
                     $systemPrompt .= "Discúlpate brevemente y sugiere reformular el prompt.\n";
                 }
+            } catch (\Illuminate\Http\Exceptions\HttpResponseException $e) {
+                throw $e;
             } catch (\Throwable $e) {
                 Log::error('[AIController] Error generando imagen desde chat: '.$e->getMessage());
             }
         }
 
-        // Flujo de creación de eventos desde el chat
-        $createdEvent = null;
-        $createdCount = 0;
-        $recurrenceSummary = null;
-        $askForEventDetails = false;
-        $pendingEventCreation = session('pending_calendar_event_creation', false);
-
-        // En cliente móvil la sesión es efímera (Bearer token sin cookies), así que el
-        // flag de "creación pendiente" no persiste entre turnos. Lo derivamos del
-        // historial: si Cirilo acaba de pedir los datos de un evento y hubo intención
-        // de crear en los últimos turnos, seguimos completando ese evento.
-        if (! $pendingEventCreation
-            && $request->header('X-Cirilo-Source') === 'mobile'
-            && ! empty($history)) {
-            $last = end($history);
-            $lastIsDetailRequest = is_array($last)
-                && ($last['role'] ?? '') === 'assistant'
-                && $this->looksLikeEventDetailRequest($last['content'] ?? '');
-            if ($lastIsDetailRequest) {
-                foreach (array_slice($history, -6) as $m) {
-                    if (($m['role'] ?? '') === 'user'
-                        && $this->detectCalendarCreateIntent($m['content'] ?? '')) {
-                        $pendingEventCreation = true;
-                        break;
-                    }
-                }
+        // F2: agenda desde el chat — intención, borrador por conversación, idempotencia y persistencia.
+        $agendaOutcome = ['status' => ChatAgenda::NONE, 'result' => null, 'missing' => [], 'message' => null];
+        $idempotencyKey = $request->header('Idempotency-Key');
+        $idempotencyKey = is_string($idempotencyKey) && $idempotencyKey !== '' ? mb_substr($idempotencyKey, 0, 100) : null;
+        // F2-02: con el flag, OpenAI gestiona la agenda con herramientas; Grok sigue con el flujo determinista (F2-08).
+        $agendaTools = $user && $provider === 'openai' && config('ai.agenda_tools.enabled')
+            ? new AgendaTools(app(AgendaService::class), $user, $idempotencyKey) : null;
+        if ($user && ! $agendaTools) {
+            $agendaOutcome = app(ChatAgenda::class)->handle(
+                $user, (string) $prompt, $history,
+                $activeConversation?->id,
+                $request->hasSession() ? $request->session()->getId() : null,
+                $idempotencyKey,
+            );
+        }
+        // F6-03 (sin herramientas): «guarda como pendiente…» o «tengo que…, sin fecha» → pendiente sin horario.
+        $taskOutcome = ['status' => 'none', 'tasks' => []];
+        if ($user && ! $agendaTools && $agendaOutcome['status'] === ChatAgenda::NONE && ($taskTitle = TaskIntent::capture((string) $prompt))) {
+            try {
+                [$taskStatus, $task] = app(TaskService::class)->create($user, $taskTitle, null, 'chat', $activeConversation?->id);
+                $taskOutcome = ['status' => $taskStatus, 'tasks' => [$task]];
+            } catch (\Throwable $e) {
+                Log::error('No se pudo guardar el pendiente: '.$e->getMessage());
+                $taskOutcome = ['status' => 'failed', 'tasks' => []];
             }
         }
-
-        if ($user && ($this->detectCalendarCreateIntent($prompt) || $pendingEventCreation)) {
-            $openaiCredentials = $this->getApiCredentials('openai');
-
-            // Dar contexto de la conversación reciente al extractor: combina los datos
-            // que el usuario fue dando en varios turnos (clave en mobile, donde no hay
-            // sesión que recuerde el evento a medio crear).
-            $extractionContext = $prompt;
-            if (! empty($history)) {
-                $recentHistory = array_slice($history, -6);
-                $contextLines = '';
-                foreach ($recentHistory as $msg) {
-                    $role = $msg['role'] === 'user' ? 'Usuario' : 'Asistente';
-                    $contextLines .= "{$role}: {$msg['content']}\n";
-                }
-                $extractionContext = $contextLines."Usuario: {$prompt}";
-            }
-
-            $eventData = $this->extractEventDataFromPrompt($extractionContext, $openaiCredentials['api_key']);
-
-            if ($eventData && $this->isEventDataComplete($eventData)) {
-                $creationResult  = $this->createEventFromChat($eventData, $user->id);
-                $createdEvent    = $creationResult['event'] ?? null;
-                $createdCount    = $creationResult['count'] ?? 0;
-                $recurrenceSummary = $creationResult['summary'] ?? null;
-                session()->forget('pending_calendar_event_creation');
-            } else {
-                // Faltan datos — pedir al usuario sin crear nada
-                $askForEventDetails = true;
-                session(['pending_calendar_event_creation' => true]);
-            }
-        }
+        $createdEvent = in_array($agendaOutcome['status'], [AgendaResult::CREATED, AgendaResult::REPLAYED], true) ? $agendaOutcome['result']->first() : null;
+        $createdCount = $createdEvent ? count($agendaOutcome['result']->events) : 0;
 
         // Inyectar contexto del calendario si la consulta es relevante
-        $calendarContext = $this->getCalendarContext($user, $prompt);
+        $calendarContext = app(\App\Services\InteractionTracker::class)->measure('agenda_context', fn () => $this->getCalendarContext($user, $prompt));
         if ($calendarContext) {
             $systemPrompt .= $calendarContext;
         }
 
-        if ($createdEvent) {
-            $tz = 'America/Guatemala';
-            $start = \Carbon\Carbon::parse($createdEvent->start_date)->setTimezone($tz);
-            $systemPrompt .= "\n### Evento(s) creado(s) exitosamente:\n";
-            $systemPrompt .= "Acabas de crear el/los siguiente(s) evento(s) en la agenda del usuario:\n";
-            $systemPrompt .= "- **Título:** {$createdEvent->title}\n";
-            if ($createdCount > 1 && $recurrenceSummary) {
-                $systemPrompt .= "- **Recurrencia:** {$recurrenceSummary}\n";
-                $systemPrompt .= "- **Total de eventos creados:** {$createdCount}\n";
-                $systemPrompt .= "- **Primer evento:** ".$start->locale('es')->isoFormat('dddd D [de] MMMM [de] YYYY')." a las ".$start->format('H:i')."\n";
-            } else {
-                $systemPrompt .= "- **Fecha:** ".$start->locale('es')->isoFormat('dddd D [de] MMMM [de] YYYY')."\n";
-                $systemPrompt .= "- **Hora:** ".($createdEvent->all_day ? 'Todo el día' : $start->format('H:i'))."\n";
-            }
-            if ($createdEvent->location) {
-                $systemPrompt .= "- **Lugar:** {$createdEvent->location}\n";
-            }
-            if ($createdEvent->reminder_minutes_before > 0) {
-                $systemPrompt .= "- **Recordatorio:** {$createdEvent->reminder_minutes_before} minutos antes\n";
-            }
-            $systemPrompt .= "Confirma al usuario que el/los evento(s) fue(ron) agendado(s) correctamente y puede verlos en su [Agenda](/agenda).\n";
-        } elseif ($askForEventDetails) {
-            $systemPrompt .= "\n### Crear Evento en Agenda:\n";
-            $systemPrompt .= "El usuario quiere crear un evento en su agenda pero no proporcionó todos los datos necesarios. ";
-            $systemPrompt .= "Pregúntale de forma amigable y concisa por los datos que falten. ";
-            $systemPrompt .= "Los datos mínimos requeridos son: **título del evento**, **fecha** y **hora**. ";
-            $systemPrompt .= "Opcionalmente puedes preguntar por lugar, descripción y si desea recordatorio (cuántos minutos antes). ";
-            $systemPrompt .= "No inventes datos ni crees el evento todavía — espera a que el usuario confirme los detalles.\n";
+        $agendaInstructions = ($agendaTools ? AgendaTools::instructions() : ChatAgenda::instructions($agendaOutcome)).self::taskInstructions($taskOutcome);
+        if ($agendaInstructions !== '') {
+            $systemPrompt .= $agendaInstructions;
         } elseif ($calendarContext) {
             $systemPrompt .= "Si el usuario quiere **crear** un nuevo evento, puedes hacerlo directamente: solo pídele los detalles necesarios.\n";
         }
 
         try {
             $credentials = $this->getApiCredentials($provider);
-            $client = new Client;
+            $client = $this->httpClient();
 
-            Log::info('Generando texto con proveedor: '.$provider);
-            Log::info('Prompt original recibido: '.$prompt);
-            Log::info('Historial recibido: '.count($history).' mensajes');
+            Log::info('Text generation', ['provider' => $provider, 'count' => count($history)]);
 
             // Construir mensajes con el historial de conversación
             $messages = [];
@@ -374,17 +344,17 @@ class AIController extends Controller
                         'Content-Type' => 'application/json',
                     ],
                     'json' => [
-                        'model' => 'gpt-4.1',
+                        'model' => config('ai.models.chat'),
                         'instructions' => $systemPrompt,
                         'input' => $inputMessages,
-                        'tools' => [['type' => 'web_search_preview', 'search_context_size' => 'medium']],
+                        'tools' => array_merge([['type' => 'web_search_preview', 'search_context_size' => config('ai.web_search.context_size', 'medium')]], $agendaTools ? AgendaTools::definitions() : []),
                         'temperature' => 0.6,
                     ],
                 ];
                 $endpoint = $credentials['base_url'].'/responses';
             } elseif ($provider === 'grok') {
                 // $requestData['json']['model'] = 'grok-4-fast-reasoning';
-                $requestData['json']['model'] = 'grok-4-1-fast-reasoning';
+                $requestData['json']['model'] = config('ai.models.grok');
                 $requestData['json']['max_tokens'] = 2000; // Más tokens para Grok
                 $requestData['json']['stream'] = false;
                 $requestData['json']['temperature'] = 0.7;
@@ -411,7 +381,7 @@ class AIController extends Controller
             // Configurar cliente HTTP específicamente para Grok con timeouts adecuados y optimizado para AWS
             if ($provider === 'grok') {
                 // Crear un nuevo cliente con configuración específica para Grok en entorno AWS
-                $client = new Client([
+                $client = $this->httpClient([
                     'timeout' => 180,  // Timeout total en segundos (aumentado para entornos AWS)
                     'connect_timeout' => 60, // Timeout de conexión (aumentado para entornos AWS)
                     'read_timeout' => 180,   // Timeout de lectura (aumentado para entornos AWS)
@@ -431,164 +401,32 @@ class AIController extends Controller
                 Log::info('Cliente HTTP configurado con parámetros optimizados para AWS y timeout extendido de 180 segundos para Grok');
             }
 
+            $ctx = compact('provider', 'requestData', 'prompt', 'agendaTools', 'agendaOutcome', 'taskOutcome', 'createdEvent', 'createdCount',
+                'generateAudio', 'voice', 'systemPrompt', 'messages', 'generatedImage');
+
+            // F5-03: streaming opcional (Accept: text/event-stream); los clientes JSON no cambian.
+            if ($provider === 'openai' && $this->wantsStream($request)) {
+                return $this->streamTextResponse($client, $endpoint, $requestData, $ctx);
+            }
+
             // Realizar la solicitud
             $startTime = microtime(true);
             $response = $client->post($endpoint, $requestData);
-            $responseTime = (int) ((microtime(true) - $startTime) * 1000);
-            $body = $response->getBody();
-            $data = json_decode($body, true);
+            $data = json_decode($response->getBody(), true) ?? [];
 
-            Log::info('Respuesta del proveedor '.$provider.': '.json_encode($data));
-
-            // Extraer el texto de la respuesta según el proveedor
-            $responseText = '';
-            if ($provider === 'openai') {
-                // Responses API: output[].content[].text
-                foreach ($data['output'] ?? [] as $item) {
-                    if (($item['type'] ?? '') === 'message') {
-                        foreach ($item['content'] ?? [] as $content) {
-                            if (($content['type'] ?? '') === 'output_text') {
-                                $responseText = $content['text'];
-                                break 2;
-                            }
-                        }
-                    }
-                }
-                // Normalizar al formato choices para el frontend y para logTextGeneration
-                $data['choices'] = [['message' => ['content' => $responseText]]];
-                // Normalizar usage (Responses API usa input_tokens/output_tokens)
-                if (isset($data['usage'])) {
-                    $data['usage']['prompt_tokens'] = $data['usage']['input_tokens'] ?? 0;
-                    $data['usage']['completion_tokens'] = $data['usage']['output_tokens'] ?? 0;
-                }
-            } elseif ($provider === 'grok' && isset($data['choices'][0]['message']['content'])) {
-                $responseText = $data['choices'][0]['message']['content'];
+            // F2-02: ciclo llamada → validación → ejecución → resultado → respuesta, acotado.
+            if ($agendaTools) {
+                $data = $this->runAgendaTools($client, $endpoint, $requestData, $data, $agendaTools);
             }
+            $ctx['responseTime'] = (int) ((microtime(true) - $startTime) * 1000);
 
-            // Registrar uso de API (después de normalizar $data para tener tokens correctos)
-            $this->logTextGeneration(
-                $requestData['json']['model'],
-                $prompt,
-                $data,
-                $provider,
-                $responseTime
-            );
+            Log::info('Text response', [
+                'provider' => $provider, 'model' => $requestData['json']['model'],
+                'response_time_ms' => $ctx['responseTime'], 'status_code' => $response->getStatusCode(),
+                'total_tokens' => $data['usage']['total_tokens'] ?? 0,
+            ]);
 
-            // Agregar información del proveedor usado
-            $data['provider_used'] = $provider;
-
-            // Generar audio si se solicita
-            if ($generateAudio && ! empty($responseText)) {
-                try {
-                    // Limpiar markdown y truncar para TTS (evita timeouts en respuestas largas)
-                    $ttsText = preg_replace('/\[([^\]]+)\]\([^)]+\)/', '$1', $responseText); // [text](url) → text
-                    $ttsText = preg_replace('/https?:\/\/\S+/', '', $ttsText);              // URLs sueltas
-                    $ttsText = preg_replace('/#{1,6}\s+/m', '', $ttsText);                  // headers
-                    $ttsText = preg_replace('/\*{1,3}([^*]+)\*{1,3}/', '$1', $ttsText);     // bold/italic
-                    $ttsText = preg_replace('/`[^`]+`/', '', $ttsText);                     // inline code
-                    $ttsText = trim(preg_replace('/\s{2,}/', ' ', $ttsText));
-                    if (mb_strlen($ttsText) > 3000) {
-                        $ttsText = mb_substr($ttsText, 0, 3000).'...';
-                    }
-
-                    // Siempre usar OpenAI para text-to-speech
-                    $openaiCredentials = $this->getApiCredentials('openai');
-
-                    $audioResponse = Http::timeout(60)->withHeaders([
-                        'Authorization' => 'Bearer '.$openaiCredentials['api_key'],
-                        'Content-Type' => 'application/json',
-                    ])->post($openaiCredentials['base_url'].'/audio/speech', [
-                        'model' => 'tts-1',
-                        'input' => $ttsText,
-                        'voice' => $voice,
-                        'response_format' => 'mp3',
-                    ]);
-
-                    if ($audioResponse->successful()) {
-                        Log::info('Audio generado exitosamente para la respuesta de texto');
-
-                        $fileName = 'audio/'.uniqid().'.mp3';
-                        Storage::disk('public')->put($fileName, $audioResponse->body());
-
-                        $audioUrl = Storage::disk('public')->url($fileName);
-                        $data['audioUrl'] = $audioUrl;
-                    } else {
-                        Log::error('Error al generar audio: '.$audioResponse->status());
-                    }
-                } catch (\Exception $e) {
-                    Log::error('Excepción al generar audio: '.$e->getMessage());
-                    // No fallamos toda la respuesta si solo falla el audio
-                }
-            }
-
-            // Calcular tokens estimados
-            $totalTokens = 0;
-            $systemTokens = $this->estimateTokens($systemPrompt);
-            $historyTokens = 0;
-            $promptTokens = $this->estimateTokens($prompt);
-            $responseTokens = $this->estimateTokens($responseText);
-
-            foreach ($messages as $msg) {
-                $historyTokens += $this->estimateTokens($msg['content']);
-            }
-
-            $totalTokens = $systemTokens + $historyTokens + $promptTokens + $responseTokens;
-
-            // Determinar límite de tokens según el modelo
-            $model = $requestData['json']['model'];
-            $tokenLimit = 128000; // Valor por defecto (GPT-4o, GPT-4 Turbo, Grok 1.5)
-
-            if (strpos($model, 'gpt-4') !== false) {
-                // GPT-4o y GPT-4 Turbo tienen 128k
-                $tokenLimit = 128000;
-                // Si fuera GPT-4 original (8k) o 32k, habría que ajustar, pero asumimos versiones recientes
-            } elseif (strpos($model, 'grok') !== false) {
-                // Grok-1.5 tiene 128k context window
-                $tokenLimit = 128000;
-            } elseif (strpos($model, 'gpt-3.5') !== false) {
-                $tokenLimit = 16385;
-            }
-
-            $usagePercentage = ($totalTokens / $tokenLimit) * 100;
-
-            $data['token_usage'] = [
-                'total' => $totalTokens,
-                'limit' => $tokenLimit,
-                'percentage' => round($usagePercentage, 2),
-                'breakdown' => [
-                    'system' => $systemTokens,
-                    'history' => $historyTokens,
-                    'prompt' => $promptTokens,
-                    'response' => $responseTokens,
-                ],
-                'model' => $model,
-            ];
-
-            // Agregar advertencia si supera el 80%
-            if ($usagePercentage >= 80) {
-                $data['warning'] = [
-                    'type' => 'token_limit',
-                    'message' => 'Has utilizado el '.round($usagePercentage).'% de la capacidad de memoria ('.number_format($tokenLimit).' tokens). Te sugerimos iniciar una nueva conversación.',
-                    'threshold' => 80,
-                ];
-            }
-
-            // Incluir info del evento creado para que el frontend muestre el modal Nextcloud
-            if (! empty($createdEvent)) {
-                $data['calendar_event_created'] = [
-                    'id'        => $createdEvent->id,
-                    'series_id' => $createdEvent->series_id,
-                    'title'     => $createdEvent->title,
-                    'count'     => $createdCount ?? 1,
-                ];
-            }
-
-            // Incluir info de imagen generada para que el frontend la renderice
-            if (! empty($generatedImage)) {
-                $data['image_generated'] = $generatedImage;
-            }
-
-            return response()->json($data);
+            return response()->json($this->completeTextResponse($data, $ctx));
         } catch (RequestException $e) {
             // Registrar detalles del error para diagnóstico
             Log::error('Error en solicitud a '.$provider.': '.$e->getMessage());
@@ -605,7 +443,7 @@ class AIController extends Controller
                     try {
                         Log::info('Intentando fallback a OpenAI debido a timeout en Grok');
                         $openaiCredentials = $this->getApiCredentials('openai');
-                        $openaiClient = new Client([
+                        $openaiClient = $this->httpClient([
                             'timeout' => 60,
                             'http_errors' => false,
                         ]);
@@ -616,8 +454,8 @@ class AIController extends Controller
                                 'Content-Type' => 'application/json',
                             ],
                             'json' => [
-                                // 'model' => 'gpt-4o',
-                                'model' => 'gpt-4.1',
+                                // 'model' => config('ai.models.vision'),
+                                'model' => config('ai.models.chat'),
                                 'messages' => [['role' => 'user', 'content' => $prompt]],
                                 'max_tokens' => 2000,
                             ],
@@ -656,20 +494,28 @@ class AIController extends Controller
                 }
 
                 return response()->json([
-                    'error' => $errorResponse,
+                    'error' => 'El proveedor no pudo completar la solicitud.',
                     'provider' => $provider,
                     'errorCode' => $statusCode,
                 ], $statusCode);
             }
 
             return response()->json([
-                'error' => 'Hubo un problema con la solicitud a '.$provider.': '.$e->getMessage(),
+                'error' => 'El proveedor no pudo completar la solicitud. Intenta de nuevo más tarde.',
                 'provider' => $provider,
             ], 500);
         }
     }
 
     public function generateImage(Request $request)
+    {
+        abort_unless($request->user(), 401);
+        $request->validate(['prompt' => 'required|string|max:'.config('ai_security.prompt_length')]);
+
+        return app(ImageQuotaService::class)->generate($request->user(), fn () => $this->requestImage($request));
+    }
+
+    private function requestImage(Request $request)
     {
         $user = auth()->user();
         $provider = 'openai'; // Siempre usar OpenAI para generación de imágenes
@@ -687,7 +533,7 @@ class AIController extends Controller
             $credentials = $this->getApiCredentials($provider);
 
             // Configuración avanzada para la solicitud HTTP con manejo de timeout
-            $client = new Client([
+            $client = $this->httpClient([
                 'timeout' => 90,  // 90 segundos de timeout total
                 'connect_timeout' => 30, // 30 segundos para establecer conexión
                 'read_timeout' => 90,  // 90 segundos para leer la respuesta
@@ -711,7 +557,7 @@ class AIController extends Controller
                     'Content-Type' => 'application/json',
                 ],
                 'json' => [
-                    'model' => 'gpt-image-1',
+                    'model' => config('ai.models.image'),
                     'prompt' => $prompt,
                     'n' => 1,
                     'size' => '1024x1024',
@@ -735,8 +581,6 @@ class AIController extends Controller
                 \Illuminate\Support\Facades\Storage::disk('public')->put($filename, $imageData);
                 $imageUrl = \Illuminate\Support\Facades\Storage::disk('public')->url($filename);
 
-                $this->logImageGeneration('gpt-image-1', $prompt, true, null, $responseTime);
-
                 return response()->json([
                     'image_url' => $imageUrl,
                     'provider_used' => $provider,
@@ -744,25 +588,17 @@ class AIController extends Controller
             } else {
                 $errorMessage = 'Error al generar la imagen.';
 
-                if (isset($responseData['error']['message']) && ! empty($responseData['error']['message'])) {
-                    $errorMessage = $responseData['error']['message'];
-                } elseif (isset($responseData['error']['type'])) {
-                    if ($responseData['error']['type'] === 'image_generation_user_error') {
-                        $errorMessage = 'OpenAI no puede generar esta imagen. Intenta con un prompt diferente.';
-                    } else {
-                        $errorMessage = 'Error de tipo: '.$responseData['error']['type'];
-                    }
+                if (($responseData['error']['type'] ?? '') === 'image_generation_user_error') {
+                    $errorMessage = 'OpenAI no puede generar esta imagen. Intenta con un prompt diferente.';
                 }
 
                 Log::error('Error en la respuesta de '.$provider.': '.$statusCode.' - '.$errorMessage);
 
                 $responseTime = (int) ((microtime(true) - $startTime) * 1000);
-                $this->logImageGeneration('gpt-image-1', $prompt, false, $errorMessage, $responseTime);
-
                 return response()->json([
                     'error' => $errorMessage,
                     'provider' => $provider,
-                ], $statusCode);
+                ], $statusCode >= 400 ? $statusCode : 502);
             }
         } catch (\GuzzleHttp\Exception\ConnectException $e) {
             // Error específico de conexión
@@ -793,7 +629,7 @@ class AIController extends Controller
             Log::error('Error en la solicitud: '.$errorMessage);
 
             return response()->json([
-                'error' => 'Error en la solicitud a OpenAI: '.$errorMessage,
+                'error' => 'El proveedor no pudo generar la imagen. Intenta de nuevo más tarde.',
                 'provider' => $provider,
             ], 500);
         } catch (\Exception $e) {
@@ -801,7 +637,7 @@ class AIController extends Controller
             Log::error('Excepción: '.$e->getMessage());
 
             return response()->json([
-                'error' => 'Ocurrió un error inesperado: '.$e->getMessage(),
+                'error' => 'Ocurrió un error al generar la imagen.',
                 'provider' => $provider,
             ], 500);
         }
@@ -809,6 +645,10 @@ class AIController extends Controller
 
     public function textToSpeech(Request $request)
     {
+        $request->validate([
+            'text' => 'required|string|max:'.config('ai_security.tts_length'),
+            'voice' => 'sometimes|in:alloy,echo,fable,nova,onyx,shimmer',
+        ]);
         $user = auth()->user();
         $userProvider = $user->ai_provider ?? 'openai';
         $text = $request->input('text');
@@ -857,18 +697,18 @@ class AIController extends Controller
             // Siempre usar OpenAI para text-to-speech, independientemente del proveedor del usuario
             $credentials = $this->getApiCredentials('openai');
 
-            Log::info('Enviando solicitud a OpenAI TTS API con credenciales: '.substr($credentials['api_key'], 0, 5).'...');
+            Log::info('TTS request', ['provider' => 'openai', 'text_length' => mb_strlen($text)]);
 
             $startTime = microtime(true);
 
             // Aumentar el timeout a 120 segundos y agregar reintentos
             $response = Http::timeout(120)
-                ->retry(3, 100) // Reintentar 3 veces con 100ms de espera entre intentos
+                ->retry(3, 100, throw: false) // Devolver también el estado del fallo sin exponer excepciones.
                 ->withHeaders([
                     'Authorization' => 'Bearer '.$credentials['api_key'],
                     'Content-Type' => 'application/json',
                 ])->post($credentials['base_url'].'/audio/speech', [
-                    'model' => 'tts-1',
+                    'model' => config('ai.models.tts'),
                     // Asegurarse de que el texto no tenga caracteres problemáticos
                     'input' => mb_convert_encoding($text, 'UTF-8', 'auto'),
                     'voice' => $voice,
@@ -921,9 +761,7 @@ class AIController extends Controller
                 $this->logTextToSpeech($text, false, $errorMsg, $responseTime);
 
                 // Mensaje de error más específico
-                $errorMessage = isset($responseData['error']['message'])
-                    ? $responseData['error']['message']
-                    : 'Error al generar el audio (Código: '.$statusCode.')';
+                $errorMessage = 'No se pudo generar el audio. Intenta de nuevo más tarde.';
 
                 return response()->json([
                     'error' => $errorMessage,
@@ -935,7 +773,7 @@ class AIController extends Controller
             Log::error('Excepción en text-to-speech: '.$e->getMessage()."\n".$e->getTraceAsString());
 
             return response()->json([
-                'error' => 'Error al generar audio: '.$e->getMessage(),
+                'error' => 'No se pudo generar el audio. Intenta de nuevo más tarde.',
                 'provider' => 'openai',
             ], 500);
         }
@@ -956,7 +794,7 @@ class AIController extends Controller
 
             $startTime = microtime(true);
             $audioSize = $audioFile->getSize();
-            $client = new Client;
+            $client = $this->httpClient();
             $maxRetries = 3;
             $attempt = 0;
             $response = null;
@@ -977,7 +815,11 @@ class AIController extends Controller
                             ],
                             [
                                 'name' => 'model',
-                                'contents' => 'whisper-1',
+                                'contents' => config('ai.models.stt'),
+                            ],
+                            [
+                                'name' => 'response_format',
+                                'contents' => 'verbose_json',
                             ],
                             [
                                 'name' => 'language',
@@ -1029,7 +871,7 @@ class AIController extends Controller
             Log::error('Error en speech-to-text: '.$e->getMessage());
 
             return response()->json([
-                'error' => 'Error al procesar el audio: '.$e->getMessage(),
+                'error' => 'No se pudo procesar el audio. Intenta de nuevo más tarde.',
                 'provider' => 'openai',
             ], 500);
         }
@@ -1088,7 +930,7 @@ class AIController extends Controller
                 'Authorization' => 'Bearer '.$credentials['api_key'],
                 'Content-Type' => 'application/json',
             ])->post($credentials['base_url'].'/chat/completions', [
-                'model' => 'gpt-4.1',
+                'model' => config('ai.models.chat'),
                 'messages' => $messages,
                 'max_tokens' => 150,
                 'temperature' => 0.7,
@@ -1120,7 +962,7 @@ class AIController extends Controller
                 'message' => '¡Hola! Qué bueno verte de nuevo. ¡Vamos a aprender algo nuevo hoy!',
                 'audioUrl' => null,
                 'success' => false,
-                'error' => $e->getMessage(),
+                'error' => 'No se pudo generar el resumen.',
             ]);
         }
     }
@@ -1225,7 +1067,7 @@ class AIController extends Controller
                 'Authorization' => 'Bearer '.$credentials['api_key'],
                 'Content-Type' => 'application/json',
             ])->post($credentials['base_url'].'/chat/completions', [
-                'model' => 'gpt-4.1',
+                'model' => config('ai.models.chat'),
                 'messages' => $messages,
                 'max_tokens' => 150,
                 'temperature' => 0.7,
@@ -1257,7 +1099,7 @@ class AIController extends Controller
                 'message' => '¡Hola! Bienvenido al Centro de Aprendizaje. Estoy aquí para ayudarte a mejorar tu inglés. ¡Empecemos!',
                 'audioUrl' => null,
                 'success' => false,
-                'error' => $e->getMessage(),
+                'error' => 'No se pudo generar el saludo.',
             ]);
         }
     }
@@ -1341,255 +1183,366 @@ class AIController extends Controller
      * último mensaje de Cirilo pedía título/fecha/hora, el siguiente turno del
      * usuario se trata como continuación de la creación del evento.
      */
-    private function looksLikeEventDetailRequest(string $text): bool
+    /**
+     * Posprocesamiento común (JSON y streaming): texto, uso, audio opcional, tokens, agenda e imagen.
+     */
+    private function completeTextResponse(array $data, array $ctx): array
     {
-        if (! str_contains($text, '?')) {
-            return false;
+        extract($ctx);
+
+        // Extraer el texto de la respuesta según el proveedor
+        $responseText = '';
+        if ($provider === 'openai') {
+            // Responses API: output[].content[].text
+            foreach ($data['output'] ?? [] as $item) {
+                if (($item['type'] ?? '') === 'message') {
+                    foreach ($item['content'] ?? [] as $content) {
+                        if (($content['type'] ?? '') === 'output_text') {
+                            $responseText = $content['text'];
+                            break 2;
+                        }
+                    }
+                }
+            }
+            // Normalizar al formato choices para el frontend y para logTextGeneration
+            $data['choices'] = [['message' => ['content' => $responseText]]];
+
+            if ($agendaTools) {
+                $taskOutcome = $agendaTools->taskOutcome();
+                $agendaOutcome = $agendaTools->outcome((string) $prompt, $responseText);
+                $persisted = in_array($agendaOutcome['status'], [AgendaResult::CREATED, AgendaResult::REPLAYED], true) ? $agendaOutcome['events'] : [];
+                $createdEvent = $persisted[0] ?? null;
+                $createdCount = count($persisted);
+            }
+            // Normalizar usage (Responses API usa input_tokens/output_tokens)
+            if (isset($data['usage'])) {
+                $data['usage']['prompt_tokens'] = $data['usage']['input_tokens'] ?? 0;
+                $data['usage']['completion_tokens'] = $data['usage']['output_tokens'] ?? 0;
+            }
+        } elseif ($provider === 'grok' && isset($data['choices'][0]['message']['content'])) {
+            $responseText = $data['choices'][0]['message']['content'];
         }
 
-        return (bool) preg_match(
-            '/t[íi]tulo|nombre|fecha|hora|cu[áa]ndo|qu[ée] evento|c[óo]mo se llama|detalles/i',
-            $text
+        // Registrar uso de API (después de normalizar $data para tener tokens correctos)
+        $this->logTextGeneration(
+            $requestData['json']['model'],
+            $prompt,
+            $data,
+            $provider,
+            $responseTime
         );
+
+        // Agregar información del proveedor usado
+        $data['provider_used'] = $provider;
+
+        // Generar audio si se solicita
+        if ($generateAudio && ! empty($responseText)) {
+            try {
+                // Limpiar markdown y truncar para TTS (evita timeouts en respuestas largas)
+                $ttsText = preg_replace('/\[([^\]]+)\]\([^)]+\)/', '$1', $responseText); // [text](url) → text
+                $ttsText = preg_replace('/https?:\/\/\S+/', '', $ttsText);              // URLs sueltas
+                $ttsText = preg_replace('/#{1,6}\s+/m', '', $ttsText);                  // headers
+                $ttsText = preg_replace('/\*{1,3}([^*]+)\*{1,3}/', '$1', $ttsText);     // bold/italic
+                $ttsText = preg_replace('/`[^`]+`/', '', $ttsText);                     // inline code
+                $ttsText = trim(preg_replace('/\s{2,}/', ' ', $ttsText));
+                if (mb_strlen($ttsText) > 3000) {
+                    $ttsText = mb_substr($ttsText, 0, 3000).'...';
+                }
+
+                // Siempre usar OpenAI para text-to-speech
+                $openaiCredentials = $this->getApiCredentials('openai');
+
+                $audioResponse = Http::timeout(60)->withHeaders([
+                    'Authorization' => 'Bearer '.$openaiCredentials['api_key'],
+                    'Content-Type' => 'application/json',
+                ])->post($openaiCredentials['base_url'].'/audio/speech', [
+                    'model' => config('ai.models.tts'),
+                    'input' => $ttsText,
+                    'voice' => $voice,
+                    'response_format' => 'mp3',
+                ]);
+
+                if ($audioResponse->successful()) {
+                    Log::info('Audio generado exitosamente para la respuesta de texto');
+
+                    $fileName = 'audio/'.uniqid().'.mp3';
+                    Storage::disk('public')->put($fileName, $audioResponse->body());
+
+                    $audioUrl = Storage::disk('public')->url($fileName);
+                    $data['audioUrl'] = $audioUrl;
+                } else {
+                    Log::error('Error al generar audio: '.$audioResponse->status());
+                }
+            } catch (\Exception $e) {
+                Log::error('Excepción al generar audio: '.$e->getMessage());
+                // No fallamos toda la respuesta si solo falla el audio
+            }
+        }
+
+        // Calcular tokens estimados
+        $totalTokens = 0;
+        $systemTokens = $this->estimateTokens($systemPrompt);
+        $historyTokens = 0;
+        $promptTokens = $this->estimateTokens($prompt);
+        $responseTokens = $this->estimateTokens($responseText);
+
+        foreach ($messages as $msg) {
+            $historyTokens += $this->estimateTokens($msg['content']);
+        }
+
+        $totalTokens = $systemTokens + $historyTokens + $promptTokens + $responseTokens;
+
+        // Determinar límite de tokens según el modelo
+        $model = $requestData['json']['model'];
+        $tokenLimit = 128000; // Valor por defecto (GPT-4o, GPT-4 Turbo, Grok 1.5)
+
+        if (strpos($model, 'gpt-4') !== false) {
+            // GPT-4o y GPT-4 Turbo tienen 128k
+            $tokenLimit = 128000;
+            // Si fuera GPT-4 original (8k) o 32k, habría que ajustar, pero asumimos versiones recientes
+        } elseif (strpos($model, 'grok') !== false) {
+            // Grok-1.5 tiene 128k context window
+            $tokenLimit = 128000;
+        } elseif (strpos($model, 'gpt-3.5') !== false) {
+            $tokenLimit = 16385;
+        }
+
+        $usagePercentage = ($totalTokens / $tokenLimit) * 100;
+
+        $data['token_usage'] = [
+            'total' => $totalTokens,
+            'limit' => $tokenLimit,
+            'percentage' => round($usagePercentage, 2),
+            'breakdown' => [
+                'system' => $systemTokens,
+                'history' => $historyTokens,
+                'prompt' => $promptTokens,
+                'response' => $responseTokens,
+            ],
+            'model' => $model,
+        ];
+
+        // Agregar advertencia si supera el 80%
+        if ($usagePercentage >= 80) {
+            $data['warning'] = [
+                'type' => 'token_limit',
+                'message' => 'Has utilizado el '.round($usagePercentage).'% de la capacidad de memoria ('.number_format($tokenLimit).' tokens). Te sugerimos iniciar una nueva conversación.',
+                'threshold' => 80,
+            ];
+        }
+
+        // F2-06: contrato común de agenda (web y móvil); calendar_event_created se conserva por compatibilidad.
+        $data['agenda'] = ChatAgenda::contract($agendaOutcome);
+
+        // F6-06: resultado de pendientes, visible y corregible desde la tarjeta o desde /hoy.
+        $data['tasks'] = ['status' => $taskOutcome['status'], 'items' => array_map(fn ($t) => TaskService::describe($t), $taskOutcome['tasks'])];
+        if ($taskOutcome['status'] === 'created' && $taskOutcome['tasks']) {
+            $data['task_created'] = TaskService::describe($taskOutcome['tasks'][0]);
+        }
+
+        // Incluir info del evento creado para que el frontend muestre el modal Nextcloud
+        if (! empty($createdEvent)) {
+            $data['calendar_event_created'] = [
+                'id'        => $createdEvent->id,
+                'series_id' => $createdEvent->series_id,
+                'title'     => $createdEvent->title,
+                'count'     => $createdCount ?? 1,
+            ];
+        }
+
+        // Incluir info de imagen generada para que el frontend la renderice
+        if (! empty($generatedImage)) {
+            $data['image_generated'] = $generatedImage;
+        }
+
+
+        return $data;
+    }
+
+    private function wantsStream(Request $request): bool
+    {
+        return str_contains((string) $request->header('Accept'), 'text/event-stream') || $request->boolean('stream');
     }
 
     /**
-     * Detecta si el usuario quiere CREAR un evento en el calendario.
+     * F5-03/F5-05: respuesta en Server-Sent Events. `delta` con texto parcial, `agenda` en cuanto una
+     * acción queda guardada (así el cliente puede avisar aunque el usuario detenga la respuesta),
+     * `done` con el mismo contrato que la respuesta JSON, o `error`.
+     */
+    private function streamTextResponse(Client $client, string $endpoint, array $requestData, array $ctx)
+    {
+        $interactionId = app(\App\Services\InteractionTracker::class)->id;
+
+        return response()->stream(function () use ($client, $endpoint, $requestData, $ctx, $interactionId) {
+            ignore_user_abort(true); // Terminar el registro aunque el usuario cierre la conexión.
+            $tracker = app(\App\Services\InteractionTracker::class);
+            $tracker->id = $interactionId;
+            $emit = function (string $event, array $payload): bool {
+                echo "event: {$event}\ndata: ".json_encode($payload, JSON_UNESCAPED_UNICODE)."\n\n";
+                if (ob_get_level() > 0 && ! app()->runningUnitTests()) {
+                    @ob_flush();
+                }
+                flush();
+
+                return ! connection_aborted();
+            };
+            $agendaTools = $ctx['agendaTools'];
+
+            try {
+                if (! $agendaTools && in_array($ctx['agendaOutcome']['status'], [AgendaResult::CREATED, AgendaResult::REPLAYED], true)) {
+                    $emit('agenda', ChatAgenda::contract($ctx['agendaOutcome']));
+                }
+                $start = microtime(true);
+                $data = $this->streamProvider($client, $endpoint, $requestData, fn (string $delta) => $emit('delta', ['text' => $delta]));
+                $aborted = connection_aborted() || ! empty($data['aborted']);
+                $calls = array_filter($data['output'] ?? [], fn ($item) => ($item['type'] ?? '') === 'function_call');
+                if ($agendaTools && $calls && ! $aborted) {
+                    $emit('status', ['stage' => 'agenda']);
+                    $data = $this->runAgendaTools($client, $endpoint, $requestData, $data, $agendaTools);
+                    $emit('agenda', ChatAgenda::contract($agendaTools->outcome((string) $ctx['prompt'], '')));
+                }
+                $ctx['responseTime'] = (int) ((microtime(true) - $start) * 1000);
+                if ($aborted) {
+                    $ctx['generateAudio'] = false; // El usuario detuvo la respuesta: no generar audio.
+                }
+                $emit('done', $this->completeTextResponse($data, $ctx) + ['interaction_id' => $interactionId]);
+            } catch (\Throwable $e) {
+                Log::error('Chat en streaming falló: '.$e->getMessage());
+                $emit('error', ['message' => 'Lo siento, ocurrió un error al generar la respuesta. Intenta de nuevo.']);
+            } finally {
+                $tracker->id = null;
+            }
+        }, 200, ['Content-Type' => 'text/event-stream; charset=UTF-8', 'Cache-Control' => 'no-cache, no-transform', 'X-Accel-Buffering' => 'no']);
+    }
+
+    /**
+     * Llama a la Responses API con stream=true y reenvía cada fragmento de texto. Devuelve la respuesta
+     * final (evento response.completed) con output y uso. Si $onDelta devuelve false, deja de leer.
+     */
+    private function streamProvider(Client $client, string $endpoint, array $requestData, callable $onDelta): array
+    {
+        $requestData['json']['stream'] = true;
+        $requestData['stream'] = true;
+        $response = $client->post($endpoint, $requestData);
+        $body = $response->getBody();
+        $buffer = '';
+        $completed = null;
+
+        while (! $body->eof()) {
+            $buffer .= str_replace("\r\n", "\n", $body->read(2048));
+            while (($position = strpos($buffer, "\n\n")) !== false) {
+                $block = substr($buffer, 0, $position);
+                $buffer = substr($buffer, $position + 2);
+                $payload = null;
+                foreach (explode("\n", $block) as $line) {
+                    if (str_starts_with($line, 'data: ')) {
+                        $payload = json_decode(substr($line, 6), true);
+                    }
+                }
+                $type = is_array($payload) ? ($payload['type'] ?? '') : '';
+                if ($type === 'response.output_text.delta') {
+                    if ($onDelta((string) ($payload['delta'] ?? '')) === false) {
+                        $body->close();
+                        app(\App\Services\AiTransport::class)->finishStream($response, []);
+
+                        return ['output' => [], 'aborted' => true];
+                    }
+                } elseif (in_array($type, ['response.completed', 'response.incomplete'], true)) {
+                    $completed = $payload['response'] ?? [];
+                } elseif (in_array($type, ['response.failed', 'error'], true)) {
+                    throw new \RuntimeException('El proveedor informó un error en el streaming');
+                }
+            }
+        }
+
+        app(\App\Services\AiTransport::class)->finishStream($response, $completed ?? []);
+
+        return $completed ?? ['output' => []];
+    }
+
+    /**
+     * Ejecuta las llamadas a herramientas de agenda y reenvía los resultados al modelo hasta obtener
+     * texto o agotar las iteraciones. Suma el uso de todas las llamadas.
+     */
+    private function runAgendaTools(Client $client, string $endpoint, array $requestData, ?array $data, AgendaTools $tools): ?array
+    {
+        $usage = ['input_tokens' => 0, 'output_tokens' => 0, 'total_tokens' => 0];
+        $input = $requestData['json']['input'];
+        for ($iteration = 1; ; $iteration++) {
+            foreach (array_keys($usage) as $field) {
+                $usage[$field] += (int) ($data['usage'][$field] ?? 0);
+            }
+            $calls = array_values(array_filter($data['output'] ?? [], fn ($item) => ($item['type'] ?? '') === 'function_call'));
+            if ($calls === []) {
+                break;
+            }
+            if ($iteration >= (int) config('ai.agenda_tools.max_iterations', 4)) {
+                Log::warning('Agenda: se agotaron las iteraciones de herramientas');
+                $data['output'] = [['type' => 'message', 'content' => [['type' => 'output_text',
+                    'text' => 'No pude completar la operación de agenda. Inténtalo de nuevo o revisa tu [Agenda](/agenda).']]]];
+                break;
+            }
+
+            // El modelo necesita ver sus propias llamadas (y razonamientos) junto con cada resultado.
+            foreach ($data['output'] as $item) {
+                if (in_array($item['type'] ?? '', ['function_call', 'reasoning'], true)) {
+                    $input[] = $item;
+                }
+            }
+            foreach ($calls as $call) {
+                $input[] = ['type' => 'function_call_output', 'call_id' => $call['call_id'],
+                    'output' => json_encode($tools->execute((string) $call['name'], (string) ($call['arguments'] ?? '')), JSON_UNESCAPED_UNICODE)];
+            }
+
+            $requestData['json']['input'] = $input;
+            $data = json_decode($client->post($endpoint, $requestData)->getBody(), true);
+        }
+        $data['usage'] = array_merge($data['usage'] ?? [], $usage);
+
+        return $data;
+    }
+
+    /** Instrucciones al modelo según lo que realmente pasó con el pendiente (flujo sin herramientas). */
+    private static function taskInstructions(array $outcome): string
+    {
+        $task = $outcome['tasks'][0] ?? null;
+
+        return match ($outcome['status']) {
+            'created' => "\n### Pendiente guardado:\nGuardaste el pendiente sin fecha «{$task->title}» en la lista de pendientes del usuario (no es un evento de agenda ni tiene horario). "
+                ."Confírmalo en una frase y di que puede verlo, completarlo o posponerlo en [Hoy](/hoy). No le asignes fecha ni hora.\n",
+            'duplicate' => "\n### Pendiente ya existente:\n«{$task->title}» ya estaba en la lista de pendientes; no se creó otro. Díselo brevemente.\n",
+            'failed' => "\n### Error al guardar el pendiente:\nNO se pudo guardar el pendiente. No digas que quedó guardado; sugiere agregarlo desde [Hoy](/hoy).\n",
+            default => '',
+        };
+    }
+
+    /**
+     * Detecta si el usuario quiere CREAR un evento en el calendario (F2-03: AgendaIntent).
      */
     private function detectCalendarCreateIntent(string $prompt): bool
     {
-        $lower = mb_strtolower($prompt);
-        $createKeywords = [
-            // Imperativo directo
-            'agéndame', 'agendame', 'agendala', 'agéndala', 'agendalo', 'agéndalo',
-            'agrégame', 'agregame', 'agrégala', 'agrégalo',
-            'apúntame', 'apuntame', 'apúntala', 'apúntalo',
-            'anótame', 'anotame', 'anótalo', 'anotalo', 'anótala', 'anotala',
-            'guárdala', 'guardala', 'guárdalo', 'guardalo',
-            'prográmame', 'programame',
-            'ponla en', 'ponlo en',
-            // Recordatorio implica creación de evento
-            'ponme un recordatorio', 'pon un recordatorio', 'ponme recordatorio',
-            // Frases de deseo/necesidad
-            'quiero agendar', 'quiero que agendes', 'quiero que crees', 'quiero que lo agendes', 'quiero que la agendes',
-            'quisiera agendar', 'quisiera que agendes', 'quisiera que programes', 'quisiera que me avises',
-            'necesito agendar', 'necesito que agendes',
-            'me gustaría agendar', 'me gustaria agendar', 'me gustaría que agendes',
-            'tengo que agendar',
-            'ayúdame a agendar', 'ayudame a agendar',
-            // Frases de creación explícita
-            'crea un evento', 'crea el evento', 'crear un evento',
-            'crea una cita', 'crear una cita',
-            'crea una reunión', 'crear una reunión',
-            'programa un', 'programa el', 'programar un',
-            'programa una reunión', 'programa una cita',
-            'puedes agendar', 'puedes crear', 'puedes programar',
-            'pon en mi agenda', 'añade a mi agenda', 'agrega a mi agenda',
-            'agenda una', 'agenda un', 'agenda el', 'agenda para',
-            'registra un evento', 'registra la reunión', 'registra el evento',
-        ];
-
-        foreach ($createKeywords as $kw) {
-            if (str_contains($lower, $kw)) {
-                return true;
-            }
-        }
-
-        return false;
+        return AgendaIntent::wantsToCreate($prompt);
     }
 
     /**
-     * Valida que los datos extraídos de un evento sean suficientes para crearlo.
+     * Datos suficientes para crear: nombre, fecha y hora (o «todo el día»). Nunca se supone la hora.
      */
     private function isEventDataComplete(array $data): bool
     {
-        $title = trim($data['title'] ?? '');
-        $placeholders = ['string', 'null', 'none', 'n/a', 'evento', 'evento sin título', ''];
-
-        if (empty($title) || in_array(strtolower($title), $placeholders)) {
-            return false;
-        }
-
-        // Fecha mínima requerida
-        if (empty($data['start_date'])) {
-            return false;
-        }
-
-        return true;
+        return app(ChatAgenda::class)->missing($data) === [];
     }
 
     /**
-     * Extrae datos estructurados de un evento a partir del prompt del usuario usando GPT.
-     */
-    private function extractEventDataFromPrompt(string $prompt, string $apiKey): ?array
-    {
-        $tz = 'America/Guatemala';
-        $now = \Carbon\Carbon::now($tz)->format('Y-m-d H:i');
-
-        $extractionPrompt = "Analiza el siguiente texto y extrae los datos de un evento de calendario. "
-            ."Responde SOLO con JSON válido, sin texto adicional ni bloques de código.\n\n"
-            ."Fecha y hora actual: {$now} (zona horaria: Guatemala CST, UTC-6)\n\n"
-            ."Texto:\n\"{$prompt}\"\n\n"
-            ."Devuelve un JSON con esta estructura (usa null para campos no mencionados):\n"
-            .'{"title":null,"start_date":null,"start_time":null,"end_date":null,"end_time":null,"description":null,"location":null,"reminder_minutes_before":30,"recurrence_type":"none","recurrence_days":null,"recurrence_end_date":null}'."\n\n"
-            ."Reglas importantes:\n"
-            ."- title: nombre concreto del evento. Si el usuario NO mencionó un nombre específico, devuelve null\n"
-            ."- start_date: formato YYYY-MM-DD. Si dice 'hoy' o no se menciona ninguna fecha, usa la fecha actual. Si dice 'mañana' calcula la fecha de mañana. Si dice un día de la semana (ej. 'el lunes'), calcula la fecha del próximo lunes.\n"
-            ."- start_time: formato HH:MM en 24h. Si no se menciona hora, devuelve null\n"
-            ."- end_time: si no se menciona, añade 1 hora a start_time. Si start_time es null, devuelve null\n"
-            ."- end_date: igual a start_date si no se menciona otra fecha\n"
-            ."- reminder_minutes_before: extráelo si el usuario lo menciona, sino usa 30\n"
-            ."- recurrence_type: 'none' si es evento único; 'daily' si es todos los días; 'weekdays' si es lunes a viernes; 'weekly' si repite cada semana en días específicos; 'custom' para otros patrones de días específicos\n"
-            ."- recurrence_days: array de días en inglés en minúsculas (monday/tuesday/wednesday/thursday/friday/saturday/sunday). Solo si recurrence_type NO es 'none' ni 'daily'. Para 'weekdays' devuelve [\"monday\",\"tuesday\",\"wednesday\",\"thursday\",\"friday\"]\n"
-            ."- recurrence_end_date: fecha fin de la recurrencia en YYYY-MM-DD si el usuario la menciona explícitamente, sino null";
-
-        try {
-            $response = Http::withHeaders([
-                'Authorization' => 'Bearer '.$apiKey,
-                'Content-Type' => 'application/json',
-            ])->timeout(15)->post('https://api.openai.com/v1/chat/completions', [
-                'model' => 'gpt-4.1-mini',
-                'messages' => [['role' => 'user', 'content' => $extractionPrompt]],
-                'temperature' => 0,
-                'max_tokens' => 400,
-            ]);
-
-            if (! $response->successful()) {
-                Log::error('Error al extraer datos del evento: '.$response->body());
-                return null;
-            }
-
-            $content = $response->json('choices.0.message.content');
-            // Limpiar posibles bloques markdown ```json ... ```
-            $content = preg_replace('/^```json\s*/m', '', $content);
-            $content = preg_replace('/^```\s*/m', '', $content);
-            $eventData = json_decode(trim($content), true);
-
-            return is_array($eventData) ? $eventData : null;
-        } catch (\Exception $e) {
-            Log::error('Excepción al extraer datos del evento: '.$e->getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * Crea uno o varios CalendarEvent en la base de datos a partir de datos extraídos por IA.
-     * Soporta recurrencia: daily, weekdays (lun-vie), weekly y custom (días específicos).
-     * Retorna array con ['event' => primer_evento, 'count' => total, 'summary' => descripción].
+     * Crea uno o varios eventos a partir de datos del extractor (serie en una sola transacción).
+     * Retorna ['event' => primer_evento, 'count' => total, 'summary' => descripción].
      */
     private function createEventFromChat(array $data, int $userId): array
     {
-        $tz            = 'America/Guatemala';
-        $startTime     = $data['start_time'] ?? '09:00';
-        $endTime       = $data['end_time']   ?? '10:00';
-        $recurrenceType     = $data['recurrence_type'] ?? 'none';
-        $recurrenceDays     = $data['recurrence_days'] ?? null;
-        $recurrenceEndDate  = $data['recurrence_end_date'] ?? null;
+        $result = app(AgendaService::class)->create(\App\Models\User::findOrFail($userId), app(ChatAgenda::class)->attributes($data));
 
-        // series_id compartido — se asigna antes del loop para series recurrentes
-        $seriesId = null;
-
-        // Closure para crear un evento en una fecha concreta
-        $makeEvent = function (string $date) use ($data, $userId, $tz, $startTime, $endTime, &$seriesId): \App\Models\CalendarEvent {
-            $event = new \App\Models\CalendarEvent;
-            $event->user_id                 = $userId;
-            $event->series_id               = $seriesId;
-            $event->title                   = $data['title'] ?? 'Evento sin título';
-            $event->description             = $data['description'] ?? '';
-            $event->start_date              = \Carbon\Carbon::parse("{$date} {$startTime}", $tz);
-            $event->end_date                = \Carbon\Carbon::parse("{$date} {$endTime}", $tz);
-            $event->all_day                 = false;
-            $event->category                = 'general';
-            $event->location                = $data['location'] ?? '';
-            $event->color                   = '#3788d8';
-            $event->reminder_minutes_before = (int) ($data['reminder_minutes_before'] ?? 30);
-            $event->notified                = false;
-            $event->status                  = 'pending';
-            $event->save();
-            return $event;
-        };
-
-        try {
-            // ── Evento único ──────────────────────────────────────────────
-            if ($recurrenceType === 'none' || $recurrenceType === null) {
-                $event = $makeEvent($data['start_date'] ?? date('Y-m-d'));
-                Log::info("Evento único creado desde chat para usuario {$userId}: {$event->title} ({$event->start_date})");
-                return ['event' => $event, 'count' => 1, 'summary' => null];
-            }
-
-            // ── Mapeo de nombres de día → dayOfWeek de Carbon (0=Dom … 6=Sáb) ──
-            $dayMap = [
-                'monday' => 1, 'tuesday' => 2, 'wednesday' => 3,
-                'thursday' => 4, 'friday' => 5, 'saturday' => 6, 'sunday' => 0,
-                'lunes' => 1, 'martes' => 2, 'miércoles' => 3, 'miercoles' => 3,
-                'jueves' => 4, 'viernes' => 5, 'sábado' => 6, 'sabado' => 6, 'domingo' => 0,
-            ];
-
-            // ── Determinar días objetivo ──────────────────────────────────
-            if ($recurrenceType === 'daily') {
-                $targetDays = [0, 1, 2, 3, 4, 5, 6];
-            } elseif ($recurrenceType === 'weekdays') {
-                $targetDays = [1, 2, 3, 4, 5];
-            } else {
-                // weekly / custom — usar recurrence_days
-                $targetDays = array_values(array_unique(array_filter(
-                    array_map(fn ($d) => $dayMap[strtolower(trim($d))] ?? null, (array) $recurrenceDays),
-                    fn ($d) => $d !== null
-                )));
-            }
-
-            // Si no hay días válidos, crear evento único
-            if (empty($targetDays)) {
-                $event = $makeEvent($data['start_date'] ?? date('Y-m-d'));
-                return ['event' => $event, 'count' => 1, 'summary' => null];
-            }
-
-            // ── Rango de fechas (máximo 90 días) ──────────────────────────
-            $startDate = \Carbon\Carbon::parse($data['start_date'] ?? 'today', $tz)->startOfDay();
-            $endDate   = $recurrenceEndDate
-                ? \Carbon\Carbon::parse($recurrenceEndDate, $tz)->startOfDay()
-                : $startDate->copy()->addWeeks(4);
-
-            $maxEnd = $startDate->copy()->addDays(90);
-            if ($endDate->gt($maxEnd)) {
-                $endDate = $maxEnd;
-            }
-
-            // ── Asignar series_id antes de crear los eventos ──────────────
-            $seriesId = \Illuminate\Support\Str::uuid()->toString();
-
-            // ── Crear un evento por cada día que coincida ─────────────────
-            $events  = [];
-            $current = $startDate->copy();
-            while ($current->lte($endDate)) {
-                if (in_array($current->dayOfWeek, $targetDays)) {
-                    $events[] = $makeEvent($current->format('Y-m-d'));
-                }
-                $current->addDay();
-            }
-
-            if (empty($events)) {
-                $event = $makeEvent($data['start_date'] ?? date('Y-m-d'));
-                return ['event' => $event, 'count' => 1, 'summary' => null];
-            }
-
-            $labelMap = [
-                'daily'    => 'todos los días',
-                'weekdays' => 'lunes a viernes',
-            ];
-            $recurrenceLabel = $labelMap[$recurrenceType]
-                ?? implode(', ', array_map('ucfirst', (array) $recurrenceDays));
-            $endFmt  = $endDate->locale('es')->isoFormat('D [de] MMMM [de] YYYY');
-            $summary = "{$recurrenceLabel} hasta el {$endFmt}";
-
-            Log::info("Eventos recurrentes creados desde chat para usuario {$userId}: {$events[0]->title} × ".count($events)." ({$summary})");
-
-            return ['event' => $events[0], 'count' => count($events), 'summary' => $summary];
-
-        } catch (\Exception $e) {
-            Log::error('Error al crear evento desde chat: '.$e->getMessage());
-            return ['event' => null, 'count' => 0, 'summary' => null];
-        }
+        return $result->persisted()
+            ? ['event' => $result->first(), 'count' => count($result->events), 'summary' => $result->recurrenceSummary]
+            : ['event' => null, 'count' => 0, 'summary' => null];
     }
 
     /**
@@ -1607,7 +1560,7 @@ class AIController extends Controller
             'agenda', 'evento', 'eventos', 'cita', 'citas', 'reunión', 'reuniones',
             'recordatorio', 'recordatorios', 'calendario', 'programado', 'programada',
             'hoy', 'mañana', 'semana', 'próximo', 'próxima', 'próximos', 'próximas',
-            'qué tengo', 'que tengo', 'tengo algo', 'tengo pendiente',
+            'qué tengo', 'que tengo', 'tengo algo', 'tengo pendiente', 'pendiente', 'pendientes', 'tareas', 'por hacer',
         ];
 
         $isCalendarQuery = false;
@@ -1622,42 +1575,18 @@ class AIController extends Controller
             return '';
         }
 
-        $tz = 'America/Guatemala';
-        $now = \Carbon\Carbon::now($tz);
+        $tz = config('app.timezone');
+        ['range' => [$start, $end], 'period' => $period] = AgendaDateRange::fromText($prompt, now());
+        $events = app(AgendaService::class)->between($user, $start, $end);
 
-        if (str_contains($lower, 'mañana')) {
-            $start = $now->copy()->addDay()->startOfDay();
-            $end = $now->copy()->addDay()->endOfDay();
-            $period = 'mañana';
-        } elseif (str_contains($lower, 'semana')) {
-            $start = $now->copy()->startOfWeek();
-            $end = $now->copy()->endOfWeek();
-            $period = 'esta semana';
-        } elseif (str_contains($lower, 'hoy')) {
-            $start = $now->copy()->startOfDay();
-            $end = $now->copy()->endOfDay();
-            $period = 'hoy';
-        } else {
-            $start = $now->copy()->startOfDay();
-            $end = $now->copy()->addDays(30)->endOfDay();
-            $period = 'los próximos 30 días';
-        }
-
-        $events = \App\Models\CalendarEvent::where('user_id', $user->id)
-            ->where('status', '!=', 'cancelled')
-            ->where(function ($q) use ($start, $end) {
-                $q->whereBetween('start_date', [$start, $end])
-                    ->orWhere(function ($q2) use ($start, $end) {
-                        $q2->where('start_date', '<=', $start)
-                            ->where('end_date', '>=', $end);
-                    });
-            })
-            ->orderBy('start_date')
-            ->limit(20)
-            ->get();
+        // F6: los pendientes de hoy (los mismos que la vista /hoy); lo completado no aparece.
+        $tasks = app(TaskService::class)->forToday($user);
+        $tasksBlock = $tasks->isEmpty() ? "\n### Pendientes del usuario:\nNo tiene pendientes abiertos para hoy.\n\n"
+            : "\n### Pendientes del usuario (sin horario; no son eventos):\n".$tasks->map(fn ($t) => '- '.$t->title
+                .($t->due_date ? ' (fecha límite '.$t->due_date->format('d/m').')' : ''))->implode("\n")."\n\n";
 
         if ($events->isEmpty()) {
-            return "\n### Agenda del Usuario:\nNo tienes eventos agendados para {$period}.\n\n";
+            return "\n### Agenda del Usuario:\nNo tienes eventos agendados para {$period}.\n\n".$tasksBlock;
         }
 
         $context = "\n### Agenda del Usuario ({$period}):\n";
@@ -1676,6 +1605,6 @@ class AIController extends Controller
         }
         $context .= "\n";
 
-        return $context;
+        return $context.$tasksBlock;
     }
 }

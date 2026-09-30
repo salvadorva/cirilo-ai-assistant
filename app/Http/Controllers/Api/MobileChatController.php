@@ -6,10 +6,12 @@ use App\Http\Controllers\AIController;
 use App\Http\Controllers\Controller;
 use App\Models\Conversation;
 use App\Models\Message;
+use App\Services\ConversationHistory;
+use App\Services\ConversationSummaryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use App\Support\AiLog as Log;
 use Illuminate\Support\Facades\Storage;
 
 /**
@@ -58,6 +60,10 @@ class MobileChatController extends Controller
         $response = $aiController->generateText($request);
         $data = $response->getData(true);
 
+        if (! $response->isSuccessful()) {
+            return $response;
+        }
+
         $reply = $data['choices'][0]['message']['content'] ?? '';
         $providerUsed = $data['provider_used'] ?? ($user->ai_provider ?? 'openai');
         $audioUrl = $data['audioUrl'] ?? null;
@@ -79,6 +85,7 @@ class MobileChatController extends Controller
         }
 
         $this->syncConversationContent($conversationModel);
+        $this->summarizeAfterResponse($conversationModel);
 
         Log::info('[MobileChat] user_id='.$user->id.' conv_id='.$conversationModel->id.' tokens='.($data['usage']['total_tokens'] ?? 'n/a'));
 
@@ -87,7 +94,9 @@ class MobileChatController extends Controller
             'conversation_id' => $conversationModel->id,
             'provider_used'   => $providerUsed,
             'audio_url'       => $audioUrl,
-            'event_created'   => $data['event_created'] ?? null,
+            // F2-06: la app lee event_created; el backend web lo llama calendar_event_created.
+            'event_created'   => $data['event_created'] ?? $data['calendar_event_created'] ?? null,
+            'agenda'          => $data['agenda'] ?? null,
             'image_generated' => $imageGenerated,
         ]);
     }
@@ -142,7 +151,7 @@ class MobileChatController extends Controller
                 'Authorization' => 'Bearer '.config('services.openai.api_key'),
                 'Content-Type'  => 'application/json',
             ])->timeout(60)->post('https://api.openai.com/v1/chat/completions', [
-                'model' => 'gpt-4o',
+                'model' => config('ai.models.vision'),
                 'messages' => [[
                     'role' => 'user',
                     'content' => [
@@ -204,7 +213,7 @@ class MobileChatController extends Controller
     private function resolveConversation($user, ?int $conversationId, string $promptForTitle): array
     {
         $conversation = $conversationId
-            ? Conversation::where('id', $conversationId)->where('user_id', $user->id)->first()
+            ? Conversation::where('id', $conversationId)->where('user_id', $user->id)->firstOrFail()
             : null;
 
         if (! $conversation) {
@@ -220,10 +229,24 @@ class MobileChatController extends Controller
         return ['model' => $conversation, 'created' => false];
     }
 
+    /**
+     * F4-03: el móvil nunca disparaba el resumen ni la extracción de memoria. Corre al terminar la
+     * petición (después de enviar la respuesta con php-fpm), sin depender de un worker de colas.
+     */
+    private function summarizeAfterResponse(Conversation $conversation): void
+    {
+        app()->terminating(function () use ($conversation) {
+            try {
+                $messages = json_decode($conversation->content ?? '{}', true)['messages'] ?? [];
+                app(ConversationSummaryService::class)->maybeSummarize($conversation, $messages);
+            } catch (\Throwable $e) {
+                Log::warning('[MobileChat] resumen no generado', ['conversation_id' => $conversation->id, 'error' => $e->getMessage()]);
+            }
+        });
+    }
+
     private function syncConversationContent(Conversation $conversation): void
     {
-        $allMessages = $conversation->messages()->orderBy('id')->get(['role', 'content'])->toArray();
-        $conversation->content = json_encode(['messages' => $allMessages]);
-        $conversation->save();
+        ConversationHistory::refreshContent($conversation);
     }
 }

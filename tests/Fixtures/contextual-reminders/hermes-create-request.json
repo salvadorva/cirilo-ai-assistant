@@ -1,0 +1,11 @@
+{
+  "title": "Enviar propuesta a Ana",
+  "context": "Acordamos cerrar la propuesta antes de la reunión del jueves.",
+  "next_action": "Abrir el borrador y enviarlo por correo.",
+  "scheduled_at": "2026-09-21T08:30:00-06:00",
+  "expires_at": "2026-09-21T10:00:00-06:00",
+  "timezone": "America/Guatemala",
+  "with_audio": false,
+  "confirmed_by_user": true,
+  "confirmed_at": "2026-09-21T07:59:00-06:00"
+}

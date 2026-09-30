@@ -85,7 +85,7 @@ Proveedores de IA soportados: **OpenAI** y **xAI (Grok)**.
 - **Audios estáticos**: pre-aprobados para frases frecuentes, sin costo de API en producción
 
 ### 🖼️ Imágenes
-- **Generación**: crea imágenes con DALL-E 3 desde texto
+- **Generación**: crea imágenes con `gpt-image-1` desde texto; modelos centralizados en `config/ai.php`
 - **Análisis**: describe imágenes subidas por el usuario (GPT-4o Vision)
 - **Límite diario**: 4 imágenes/día por usuario, sin límite para admins
 
@@ -177,7 +177,7 @@ La clave de OpenAI **no se versiona**: se introduce desde la ventana de configur
 
 | Capa | Tecnología |
 |------|-----------|
-| Backend | Laravel 11, PHP 8.2+ |
+| Backend | Laravel 11, PHP 8.4.1+ |
 | Base de datos | MySQL 8+ |
 | Frontend | Blade, Bootstrap 5, FullCalendar 5, Chart.js 4.4 |
 | IA — Chat | OpenAI GPT-4.1 (Responses API), Grok (xAI) |
@@ -227,7 +227,7 @@ app/
 ## Instalación
 
 ### Requisitos
-- PHP 8.2+, MySQL 8+, Composer
+- PHP 8.4.1+, MySQL 8+, Composer
 - Servidor web con HTTPS (requerido para PWA y Telegram webhook)
 
 ```bash

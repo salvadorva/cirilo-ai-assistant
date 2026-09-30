@@ -16,31 +16,30 @@ class SummarizeStaleConversations extends Command
         parent::__construct();
     }
 
+    // Tope de costo: máximo de conversaciones resumidas por corrida y antigüedad máxima.
+    const MAX_POR_CORRIDA = 20;
+
+    const DIAS_MAXIMOS = 7;
+
     public function handle(): int
     {
-        $cutoff = now()->subHours(2);
-
-        $conversations = Conversation::where('updated_at', '<', $cutoff)->get();
-
         $processed = 0;
 
-        foreach ($conversations as $conv) {
-            $contentData  = json_decode($conv->content ?? '{}', true);
-            $messages     = $contentData['messages'] ?? [];
-            $messageCount = count($messages);
-            $summarized   = $conv->summarized_message_count ?? 0;
+        // Solo conversaciones recientes: el primer arranque no resume de golpe todo el histórico.
+        Conversation::where('updated_at', '<', now()->subHours(2))
+            ->where('updated_at', '>=', now()->subDays(self::DIAS_MAXIMOS))
+            ->orderByDesc('updated_at')
+            ->each(function (Conversation $conv) use (&$processed) {
+                $messages = json_decode($conv->content ?? '{}', true)['messages'] ?? [];
+                if (count($messages) < ConversationSummaryService::RESUMEN_MINIMO_MENSAJES
+                    || count($messages) <= ($conv->summarized_message_count ?? 0)) {
+                    return true;
+                }
 
-            if ($messageCount < ConversationSummaryService::RESUMEN_MINIMO_MENSAJES) {
-                continue;
-            }
+                $this->summaryService->maybeSummarize($conv, $messages, true);
 
-            if ($messageCount <= $summarized) {
-                continue;
-            }
-
-            $this->summaryService->maybeSummarize($conv, $messages, true);
-            $processed++;
-        }
+                return ++$processed < self::MAX_POR_CORRIDA;
+            });
 
         $this->info("Procesadas {$processed} conversaciones.");
 

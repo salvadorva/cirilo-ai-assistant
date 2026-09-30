@@ -3,201 +3,87 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\AiInteraction;
 use App\Models\ApiUsageLog;
 use App\Models\User;
-use Carbon\Carbon;
+use App\Services\ApiUsageReport;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class ApiUsageController extends Controller
 {
-    /**
-     * Mostrar dashboard de uso de APIs
-     */
-    public function index(Request $request)
+    private function filters(Request $request): array
     {
-        // Filtros
-        $dateFrom = $request->input('date_from', Carbon::now()->subDays(30)->format('Y-m-d'));
-        $dateTo = $request->input('date_to', Carbon::now()->format('Y-m-d'));
-        $apiType = $request->input('api_type', 'all');
-        $userId = $request->input('user_id', 'all');
+        $request->mergeIfMissing(['date_from' => now()->subDays(30)->toDateString(), 'date_to' => now()->toDateString(), 'api_type' => 'all', 'user_id' => 'all']);
+        $data = $request->validate([
+            'date_from' => 'sometimes|required|date_format:Y-m-d',
+            'date_to' => 'sometimes|required|date_format:Y-m-d|after_or_equal:date_from',
+            'api_type' => ['sometimes', 'required', Rule::in(['all', 'text_generation', 'image_generation', 'image_analysis', 'tts', 'stt'])],
+            'user_id' => ['sometimes', 'required', 'regex:/^(all|[1-9][0-9]*)$/'],
+        ]);
 
-        // Query base - Agregar tiempo completo a las fechas
-        $dateFromFull = Carbon::parse($dateFrom)->startOfDay();
-        $dateToFull = Carbon::parse($dateTo)->endOfDay();
-
-        $query = ApiUsageLog::with('user')
-            ->whereBetween('created_at', [$dateFromFull, $dateToFull]);
-
-        if ($apiType !== 'all') {
-            $query->where('api_type', $apiType);
-        }
-
-        if ($userId !== 'all') {
-            $query->where('user_id', $userId);
-        }
-
-        // Estadísticas generales
-        $stats = [
-            'total_requests' => $query->count(),
-            'total_cost' => $query->sum('estimated_cost'),
-            'total_tokens' => $query->sum('total_tokens'),
-            'avg_response_time' => $query->avg('response_time_ms'),
-            'success_rate' => $query->where('status', 'success')->count() / max($query->count(), 1) * 100,
-        ];
-
-        // Uso por tipo de API
-        $usageByType = ApiUsageLog::select('api_type', DB::raw('count(*) as count'), DB::raw('sum(estimated_cost) as cost'))
-            ->whereBetween('created_at', [$dateFromFull, $dateToFull])
-            ->groupBy('api_type')
-            ->get();
-
-        // Top usuarios
-        $topUsers = ApiUsageLog::select('user_id', DB::raw('count(*) as count'), DB::raw('sum(estimated_cost) as cost'))
-            ->whereBetween('created_at', [$dateFromFull, $dateToFull])
-            ->whereNotNull('user_id')
-            ->groupBy('user_id')
-            ->orderBy('count', 'desc')
-            ->limit(10)
-            ->with('user')
-            ->get();
-
-        // Uso diario
-        $dailyUsage = ApiUsageLog::select(
-            DB::raw('DATE(created_at) as date'),
-            DB::raw('count(*) as count'),
-            DB::raw('sum(estimated_cost) as cost')
-        )
-            ->whereBetween('created_at', [$dateFromFull, $dateToFull])
-            ->groupBy('date')
-            ->orderBy('date', 'asc')
-            ->get();
-
-        // Logs recientes
-        $recentLogs = ApiUsageLog::with('user')
-            ->whereBetween('created_at', [$dateFromFull, $dateToFull])
-            ->orderBy('created_at', 'desc')
-            ->limit(50)
-            ->get();
-
-        // Lista de usuarios para filtro
-        $users = User::orderBy('name')->get();
-
-        return view('admin.api-usage.index', compact(
-            'stats',
-            'usageByType',
-            'topUsers',
-            'dailyUsage',
-            'recentLogs',
-            'users',
-            'dateFrom',
-            'dateTo',
-            'apiType',
-            'userId'
-        ));
+        return $data;
     }
 
-    /**
-     * Exportar datos a CSV
-     */
-    public function export(Request $request)
+    public function index(Request $request, ApiUsageReport $report)
     {
-        $dateFrom = $request->input('date_from', Carbon::now()->subDays(30)->format('Y-m-d'));
-        $dateTo = $request->input('date_to', Carbon::now()->format('Y-m-d'));
+        $filters = $this->filters($request);
+        $query = $report->query($filters);
+        $stats = $report->stats($query);
+        $usageByType = $report->grouped($query, 'api_type')->groupBy('api_type')->get();
+        $topUsers = $report->grouped($query, 'user_id')->whereNotNull('user_id')->groupBy('user_id')->orderByDesc('count')->limit(10)->with('user')->get();
+        $dailyUsage = $report->grouped($query, 'DATE(created_at) as date')->groupBy('date')->orderBy('date')->get();
+        $recentLogs = (clone $query)->with('user')->latest()->limit(50)->get();
+        $users = User::orderBy('name')->get(['id', 'name']);
+        // Feedback is per interaction, not per API call; it has no api_type dimension.
+        $feedback = AiInteraction::whereDate('created_at', '>=', $filters['date_from'])->whereDate('created_at', '<=', $filters['date_to'])
+            ->when($filters['user_id'] !== 'all', fn ($q) => $q->where('user_id', $filters['user_id']))
+            ->whereNotNull('useful')->get(['useful', 'task_achieved', 'corrections']);
 
-        $logs = ApiUsageLog::with('user')
-            ->whereBetween('created_at', [$dateFrom, $dateTo])
-            ->orderBy('created_at', 'desc')
-            ->get();
+        return view('admin.api-usage.index', compact('stats', 'usageByType', 'topUsers', 'dailyUsage', 'recentLogs', 'users', 'feedback') + [
+            'dateFrom' => $filters['date_from'], 'dateTo' => $filters['date_to'], 'apiType' => $filters['api_type'], 'userId' => $filters['user_id'],
+        ]);
+    }
 
-        $filename = 'api_usage_'.$dateFrom.'_to_'.$dateTo.'.csv';
+    public function export(Request $request, ApiUsageReport $report)
+    {
+        $filters = $this->filters($request);
+        $query = $report->query($filters)->with('user')->latest();
 
-        $headers = [
-            'Content-Type' => 'text/csv',
-            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
-        ];
-
-        $callback = function () use ($logs) {
+        return response()->streamDownload(function () use ($query) {
             $file = fopen('php://output', 'w');
-
-            // Encabezados
-            fputcsv($file, [
-                'ID',
-                'Fecha',
-                'Usuario',
-                'Proveedor',
-                'Tipo API',
-                'Modelo',
-                'Tokens',
-                'Costo (USD)',
-                'Tiempo (ms)',
-                'Estado',
-                'IP',
-            ]);
-
-            // Datos
-            foreach ($logs as $log) {
-                fputcsv($file, [
-                    $log->id,
-                    $log->created_at->format('Y-m-d H:i:s'),
-                    $log->user ? $log->user->name : 'N/A',
-                    $log->api_provider,
-                    $log->api_type,
-                    $log->model,
-                    $log->total_tokens,
-                    number_format((float) $log->estimated_cost, 6),
-                    $log->response_time_ms,
-                    $log->status,
-                    $log->ip_address,
-                ]);
+            fputcsv($file, ['ID', 'Fecha', 'Usuario', 'Proveedor', 'Tipo API', 'Modelo', 'Tokens', 'Estimación USD (no factura)', 'Estado costo', 'Tarifa fecha', 'Tiempo ms', 'Estado', 'Interacción', 'Etapa'], ',', '"', '');
+            foreach ($query->lazy(500) as $log) {
+                $row = [$log->id, $log->created_at->format('Y-m-d H:i:s'), $log->user?->name ?? 'N/A', $log->api_provider,
+                    $log->api_type, $log->model, $log->total_tokens,
+                    $log->cost_status === 'estimated' && $log->estimated_cost !== null ? $log->estimated_cost : 'Costo desconocido',
+                    $log->cost_status, $log->pricing_date, $log->response_time_ms, $log->status, $log->interaction_id, $log->stage];
+                // Spreadsheet formula injection protection, including user-controlled names.
+                $row = array_map(fn ($value) => is_string($value) && preg_match('/^[\\s]*[=+@-]/u', $value) ? "'".$value : $value, $row);
+                fputcsv($file, $row, ',', '"', '');
             }
-
             fclose($file);
-        };
-
-        return response()->stream($callback, 200, $headers);
+        }, 'api_usage_'.$filters['date_from'].'_to_'.$filters['date_to'].'.csv', ['Content-Type' => 'text/csv; charset=UTF-8']);
     }
 
-    /**
-     * Ver detalles de un log específico
-     */
     public function show($id)
     {
         $log = ApiUsageLog::with('user')->findOrFail($id);
+        $interaction = $log->interaction_id ? AiInteraction::find($log->interaction_id) : null;
+        $attempts = $log->interaction_id ? ApiUsageLog::where('interaction_id', $log->interaction_id)->orderBy('id')->get() : collect([$log]);
 
-        return view('admin.api-usage.show', compact('log'));
+        return view('admin.api-usage.show', compact('log', 'interaction', 'attempts'));
     }
 
-    /**
-     * Obtener estadísticas en formato JSON para gráficas
-     */
-    public function stats(Request $request)
+    public function stats(Request $request, ApiUsageReport $report)
     {
-        $dateFrom = $request->input('date_from', Carbon::now()->subDays(30)->format('Y-m-d'));
-        $dateTo = $request->input('date_to', Carbon::now()->format('Y-m-d'));
+        $query = $report->query($this->filters($request));
 
-        $data = [
-            'daily' => ApiUsageLog::select(
-                DB::raw('DATE(created_at) as date'),
-                'api_type',
-                DB::raw('count(*) as count')
-            )
-                ->whereBetween('created_at', [$dateFrom, $dateTo])
-                ->groupBy('date', 'api_type')
-                ->orderBy('date', 'asc')
-                ->get(),
-
-            'by_type' => ApiUsageLog::select('api_type', DB::raw('count(*) as count'))
-                ->whereBetween('created_at', [$dateFrom, $dateTo])
-                ->groupBy('api_type')
-                ->get(),
-
-            'by_provider' => ApiUsageLog::select('api_provider', DB::raw('count(*) as count'))
-                ->whereBetween('created_at', [$dateFrom, $dateTo])
-                ->groupBy('api_provider')
-                ->get(),
-        ];
-
-        return response()->json($data);
+        return response()->json([
+            'summary' => $report->stats($query),
+            'daily' => $report->grouped($query, 'DATE(created_at) as date, api_type')->groupBy('date', 'api_type')->orderBy('date')->get(),
+            'by_type' => $report->grouped($query, 'api_type')->groupBy('api_type')->get(),
+            'by_provider' => $report->grouped($query, 'api_provider')->groupBy('api_provider')->get(),
+        ]);
     }
 }

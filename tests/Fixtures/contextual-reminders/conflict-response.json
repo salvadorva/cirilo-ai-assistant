@@ -1,0 +1,17 @@
+{
+  "code": "version_conflict",
+  "message": "El recordatorio cambió; consulta su estado actual.",
+  "request_id": "<request-id>",
+  "current": {
+    "id": "<uuid>",
+    "occurrence_id": "<uuid>",
+    "state": "pending",
+    "version": 2,
+    "scheduled_at": "2026-09-21T15:00:00Z",
+    "expires_at": "2026-09-21T16:00:00Z",
+    "timezone": "America/Guatemala",
+    "with_audio": false,
+    "dispatch": {"state": "not_started", "error_category": null}
+  },
+  "server_time": "2026-09-21T14:00:00Z"
+}

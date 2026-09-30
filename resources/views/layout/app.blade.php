@@ -392,6 +392,14 @@
                 </div>
             </li>
             
+            <!-- F6: Hoy (compromisos y pendientes del día) -->
+            <li class="nav-item">
+                <a class="nav-link text-white {{ Request::routeIs('today.index') ? 'active bg-primary' : '' }}" href="{{ route('today.index') }}">
+                    <i class="fa-solid fa-sun me-2"></i>
+                    <span class="submenu-title">Hoy</span>
+                </a>
+            </li>
+
             <!-- Asistente Virtual -->
             <li class="nav-item submenu-group">
                 <a href="#" class="nav-link submenu-toggle text-white d-flex justify-content-between align-items-center" data-bs-toggle="collapse" data-bs-target="#asistenteSubmenu" aria-expanded="false">

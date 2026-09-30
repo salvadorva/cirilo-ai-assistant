@@ -52,6 +52,15 @@ return [
 
     'channels' => [
 
+        'ai' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/ai.log'),
+            'level' => 'info',
+            'days' => config('ai_security.log_retention_days', 14),
+            'permission' => 0600,
+            'locking' => true,
+        ],
+
         'stack' => [
             'driver' => 'stack',
             'channels' => explode(',', env('LOG_STACK', 'single')),

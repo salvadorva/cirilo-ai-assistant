@@ -144,6 +144,28 @@
 
 @section('content')
     <div class="container dashboard-container">
+        @if(!empty($today))
+        {{-- F6-01: lo del día primero; las funciones educativas y creativas siguen abajo. --}}
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+                <div>
+                    <h2 class="h5 mb-1"><i class="fas fa-sun me-2 text-warning"></i>Hoy, {{ $today['date_label'] }}</h2>
+                    <div class="text-muted mb-2">{{ $today['summary'] }}</div>
+                    @foreach(array_slice($today['events'], 0, 3) as $event)
+                        <div class="small"><a href="{{ $event['url'] }}">{{ $event['all_day'] ? 'Todo el día' : $event['time'] }} — {{ $event['title'] }}</a></div>
+                    @endforeach
+                    @foreach(array_slice($today['tasks'], 0, 3) as $task)
+                        <div class="small"><a href="{{ $task['url'] }}">☐ {{ $task['title'] }}</a></div>
+                    @endforeach
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    <a href="{{ route('today.index') }}" class="btn btn-outline-primary btn-sm">Ver mi día</a>
+                    <a href="{{ route('preguntas') }}" class="btn btn-primary btn-sm"><i class="fas fa-comments me-1"></i>Escribir</a>
+                    <a href="{{ url('/conversar') }}" class="btn btn-outline-secondary btn-sm"><i class="fas fa-microphone me-1"></i>Hablar</a>
+                </div>
+            </div>
+        </div>
+        @endif
         <div class="row">
             <div class="col-12 mb-4">
                 <div class="welcome-card">

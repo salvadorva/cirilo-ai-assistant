@@ -2,7 +2,7 @@
 
 namespace App\Http\Middleware;
 
-use App\Models\ApiUsageLog;
+use App\Services\ImageQuotaService;
 use Carbon\Carbon;
 use Closure;
 use Illuminate\Http\Request;
@@ -23,33 +23,21 @@ class CheckDailyImageLimit
      */
     public function handle(Request $request, Closure $next): Response
     {
-        // Solo aplicar límite a usuarios autenticados
+        // La reserva autoritativa vive en ImageQuotaService, también para chat.
         if (! Auth::check()) {
-            return $next($request);
+            throw new \Illuminate\Auth\AuthenticationException;
         }
 
         $user = Auth::user();
 
-        // Los administradores no tienen límite
-        if ($user->role && $user->role->name === 'admin') {
-            return $next($request);
-        }
-
-        // Obtener el límite personalizado del usuario o usar el valor por defecto
-        $dailyLimit = $user->daily_image_limit ?? self::DEFAULT_DAILY_LIMIT;
-
-        // Si el límite es 0, no hay restricción (sin límite)
-        if ($dailyLimit == 0) {
+        $quota = app(ImageQuotaService::class);
+        $dailyLimit = $quota->limit($user);
+        if ($dailyLimit === null) {
             return $next($request);
         }
 
         // Contar imágenes generadas hoy
-        $today = Carbon::today();
-        $imagesGeneratedToday = ApiUsageLog::where('user_id', $user->id)
-            ->where('api_type', 'image_generation')
-            ->where('status', 'success')
-            ->whereDate('created_at', $today)
-            ->count();
+        $imagesGeneratedToday = $quota->used($user);
 
         // Verificar si alcanzó el límite
         if ($imagesGeneratedToday >= $dailyLimit) {

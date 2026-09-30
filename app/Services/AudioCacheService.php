@@ -4,7 +4,7 @@ namespace App\Services;
 
 use App\Models\StaticAudio;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use App\Support\AiLog as Log;
 use Illuminate\Support\Facades\Storage;
 
 class AudioCacheService
@@ -34,7 +34,7 @@ class AudioCacheService
                 'Authorization' => 'Bearer '.$apiKey,
                 'Content-Type' => 'application/json',
             ])->post('https://api.openai.com/v1/audio/speech', [
-                'model' => 'tts-1',
+                'model' => config('ai.models.tts'),
                 'input' => $text,
                 'voice' => 'echo', // Voz específica solicitada
                 'output_format' => 'mp3',

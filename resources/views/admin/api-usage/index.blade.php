@@ -92,8 +92,9 @@
         <div class="col-md-3">
             <div class="card bg-success text-white">
                 <div class="card-body">
-                    <h6 class="card-subtitle mb-2 opacity-75">Costo Total</h6>
+                    <h6 class="card-subtitle mb-2 opacity-75">Estimación conocida (USD), no factura</h6>
                     <h2 class="card-title mb-0">${{ number_format($stats['total_cost'], 4) }}</h2>
+                    <p class="mb-0">{{ $stats['unknown_costs'] }} solicitudes con costo desconocido; no incluidas en la suma.</p>
                 </div>
             </div>
         </div>
@@ -115,6 +116,13 @@
         </div>
     </div>
 
+    <div class="alert alert-info">
+        Valoraciones voluntarias (fecha y usuario; independiente del filtro de API): {{ $feedback->count() }}.
+        Útiles: {{ $feedback->where('useful', true)->count() }};
+        tareas logradas: {{ $feedback->where('task_achieved', true)->count() }};
+        correcciones declaradas: {{ $feedback->sum('corrections') }}.
+        Sin valoración no significa fracaso ni éxito. XP no mide utilidad.
+    </div>
     <!-- Uso por Tipo de API -->
     <div class="row mb-4">
         <div class="col-md-6">
@@ -155,7 +163,7 @@
                                         @endswitch
                                     </td>
                                     <td class="text-end">{{ number_format($usage->count) }}</td>
-                                    <td class="text-end">${{ number_format($usage->cost, 4) }}</td>
+                                    <td class="text-end">${{ number_format($usage->cost, 4) }} conocidos<br>{{ $usage->unknown_count }} desconocidos</td>
                                 </tr>
                                 @endforeach
                             </tbody>
@@ -189,7 +197,7 @@
                                         {{ $userUsage->user->name ?? 'Usuario Eliminado' }}
                                     </td>
                                     <td class="text-end">{{ number_format($userUsage->count) }}</td>
-                                    <td class="text-end">${{ number_format($userUsage->cost, 4) }}</td>
+                                    <td class="text-end">${{ number_format($userUsage->cost, 4) }} conocidos<br>{{ $userUsage->unknown_count }} desconocidos</td>
                                 </tr>
                                 @endforeach
                             </tbody>
@@ -239,18 +247,20 @@
                             <tbody>
                                 @foreach($recentLogs as $log)
                                 <tr>
-                                    <td>{{ $log->created_at->format('d/m/Y H:i') }}</td>
+                                    <td><a href="{{ route('admin.api-usage.show', $log->id) }}">{{ $log->created_at->format('d/m/Y H:i') }}</a></td>
                                     <td>{{ $log->user->name ?? 'N/A' }}</td>
                                     <td>
                                         <span class="badge bg-secondary">{{ $log->api_type }}</span>
                                     </td>
                                     <td>{{ $log->model }}</td>
                                     <td class="text-end">{{ number_format($log->total_tokens) }}</td>
-                                    <td class="text-end">${{ number_format($log->estimated_cost, 6) }}</td>
+                                    <td class="text-end">{{ $log->cost_status === 'estimated' && $log->estimated_cost !== null ? '$'.number_format($log->estimated_cost, 8) : 'Costo desconocido' }}</td>
                                     <td class="text-end">{{ $log->response_time_ms }}ms</td>
                                     <td>
                                         @if($log->status == 'success')
                                             <span class="badge bg-success">Éxito</span>
+                                        @elseif($log->status == 'pending')
+                                            <span class="badge bg-warning text-dark">Pendiente / incierto</span>
                                         @else
                                             <span class="badge bg-danger">Error</span>
                                         @endif
@@ -287,7 +297,7 @@
                 backgroundColor: 'rgba(75, 192, 192, 0.2)',
                 yAxisID: 'y',
             }, {
-                label: 'Costo (USD)',
+                label: 'Estimación conocida (USD; parcial)',
                 data: costs,
                 borderColor: 'rgb(255, 99, 132)',
                 backgroundColor: 'rgba(255, 99, 132, 0.2)',

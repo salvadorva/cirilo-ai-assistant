@@ -211,7 +211,6 @@
 @endsection
 
 @push('scripts')
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     // Elementos DOM
@@ -391,12 +390,12 @@ document.addEventListener('DOMContentLoaded', function() {
             
             conversationItem.innerHTML = `
                 <div class="d-flex justify-content-between align-items-center">
-                    <h6 class="mb-1">${conversation.title}</h6>
+                    <h6 class="mb-1">${window.CiriloContent.escapeHtml(conversation.title)}</h6>
                     <span class="conversation-type ${typeClass}">
                         <i class="fa-solid ${typeIcon} me-1"></i>${getTypeLabel(conversation.type)}
                     </span>
                 </div>
-                <p class="mb-1 text-truncate small text-muted">${getConversationPreview(conversation)}</p>
+                <p class="mb-1 text-truncate small text-muted">${window.CiriloContent.escapeHtml(getConversationPreview(conversation))}</p>
                 <small class="text-muted">${formattedDate}</small>
             `;
             
@@ -533,7 +532,7 @@ document.addEventListener('DOMContentLoaded', function() {
             conversationPlaceholder.innerHTML = `
                 <div class="alert alert-danger m-3" role="alert">
                     <i class="fa-solid fa-exclamation-triangle me-2"></i>
-                    ${error.message || 'Error al cargar la conversación'}
+                    ${window.CiriloContent.escapeHtml(error.message || 'Error al cargar la conversación')}
                 </div>
             `;
         }
@@ -541,9 +540,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Formatear markdown de forma segura
     function renderMarkdown(text) {
-        if (!text) return '';
-        marked.use({ gfm: true, breaks: true });
-        return marked.parse(text);
+        return window.CiriloContent.renderMarkdown(text);
     }
 
     // Renderizar mensajes de chat
@@ -554,7 +551,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const isUser = message.role === 'user';
             const bubbleClass = isUser ? 'message-user' : 'message-assistant';
             const formattedContent = isUser
-                ? message.content.replace(/\n/g, '<br>')
+                ? window.CiriloContent.plainText(message.content)
                 : renderMarkdown(message.content);
 
             html += `
@@ -584,7 +581,7 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="mb-4">
                 <h5>Prompt</h5>
                 <div class="p-3 bg-light rounded">
-                    ${content.prompt.replace(/\n/g, '<br>')}
+                    ${window.CiriloContent.plainText(content.prompt)}
                 </div>
             </div>
             <div>
@@ -601,7 +598,7 @@ document.addEventListener('DOMContentLoaded', function() {
         lastAssistantMessage = content.assistant;
         const imageHtml = imagePath
             ? `<div class="text-center mb-4">
-                   <img src="/storage/${imagePath}" class="img-fluid rounded" style="max-height: 300px;" alt="Imagen analizada">
+                   <img src="/storage/${window.CiriloContent.escapeHtml(imagePath)}" class="img-fluid rounded" style="max-height: 300px;" alt="Imagen analizada">
                </div>`
             : '';
         return `
@@ -768,4 +765,4 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 </script>
-@endpush 
+@endpush

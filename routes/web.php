@@ -11,10 +11,13 @@ use App\Http\Controllers\ImageAnalysisController;
 use App\Http\Controllers\LoginController;
 use Illuminate\Support\Facades\Route;
 
+Route::post('/interactions/{id}/feedback', [\App\Http\Controllers\InteractionFeedbackController::class, 'store'])
+    ->middleware(['auth', 'throttle:30,1'])->whereUuid('id');
+
 // Rutas de prueba
 Route::get('/test-buttons', function () {
     return view('courses.test_buttons');
-})->name('test.buttons');
+})->name('test.buttons')->middleware(['auth', 'role:admin']);
 
 // Ruta de prueba para verificar configuración de features
 Route::get('/test-config', function () {
@@ -23,12 +26,12 @@ Route::get('/test-config', function () {
         'tutor_enabled' => config('features.tutor_enabled'),
         'config_file_content' => file_get_contents(config_path('features.php')),
     ]);
-})->name('test.config');
+})->name('test.config')->middleware(['auth', 'role:admin']);
 
 // Ruta de prueba para verificar el menú visualmente
 Route::get('/test-menu', function () {
     return view('test_menu');
-})->name('test.menu');
+})->name('test.menu')->middleware(['auth', 'role:admin']);
 
 // Ruta para la versión simplificada de la vista de sesión
 Route::get('/test-session/{course}/{session}', function ($courseId, $sessionId) {
@@ -42,21 +45,21 @@ Route::get('/test-session/{course}/{session}', function ($courseId, $sessionId) 
         'session' => $session,
         'userId' => \Illuminate\Support\Facades\Auth::id(),
     ]);
-})->name('test.session');
+})->name('test.session')->middleware(['auth', 'role:admin']);
 
 // Route::get('/', function () {
 //     return view('welcome');
 // });
 
 Route::get('/openai', function () {
-    return view('openai');
-});
+    return redirect()->route('preguntas');
+})->middleware('auth');
 
 // Nuevas rutas usando AIController (soporta OpenAI y Grok)
-Route::post('/generate-text', [AIController::class, 'generateText']);
-Route::post('/generate-image', [AIController::class, 'generateImage'])->middleware('image.limit');
-Route::post('/text-to-speech', [AIController::class, 'textToSpeech']);
-Route::post('/speech-to-text', [AIController::class, 'speechToText']);
+Route::post('/generate-text', [AIController::class, 'generateText'])->middleware('auth');
+Route::post('/generate-image', [AIController::class, 'generateImage'])->middleware(['auth', 'image.limit']);
+Route::post('/text-to-speech', [AIController::class, 'textToSpeech'])->middleware('auth');
+Route::post('/speech-to-text', [AIController::class, 'speechToText'])->middleware('auth');
 Route::post('/switch-provider', [AIController::class, 'switchProvider'])->middleware('auth');
 
 // Rutas públicas para audios estáticos (usadas por el frontend)
@@ -67,6 +70,15 @@ Route::get('/audio/static/funny-phrase/{index}', [App\Http\Controllers\Admin\Sta
 Route::get('/', [HomeController::class, 'home_index'])->name('idex_home')->middleware('role:user|admin');
 Route::post('/refresh-home-message', [HomeController::class, 'refreshHomeMessage'])->name('home.refresh-message')->middleware('auth');
 Route::get('/preguntas', [HomeController::class, 'preguntas'])->name('preguntas')->middleware('role:user|admin');
+
+// F6: vista «Hoy», pendientes y resumen diario
+Route::middleware(['auth', 'role:user|admin'])->group(function () {
+    Route::get('/hoy', [\App\Http\Controllers\TodayController::class, 'index'])->name('today.index');
+    Route::get('/hoy/datos', [\App\Http\Controllers\TodayController::class, 'data'])->name('today.data');
+    Route::put('/hoy/preferencias', [\App\Http\Controllers\TodayController::class, 'preferences'])->name('today.preferences');
+    Route::post('/pendientes', [\App\Http\Controllers\TodayController::class, 'store'])->name('tasks.store');
+    Route::patch('/pendientes/{id}', [\App\Http\Controllers\TodayController::class, 'update'])->whereNumber('id')->name('tasks.update');
+});
 Route::get('/conversar', [HomeController::class, 'conversar'])->name('conversar')->middleware('role:user|admin');
 // Endpoint de refresh de sesión/CSRF — usado por conversar.blade.php como keepalive y recovery de 419
 Route::get('/auth/csrf-token', function () {
@@ -82,8 +94,8 @@ Route::post('/generate-creative-idea', [CreativeModeController::class, 'generate
 Route::post('/save-creative-conversation', [CreativeModeController::class, 'saveCreativeConversation'])->middleware('auth');
 
 // Rutas para el modo creativo
-Route::post('/creative-mode/generate', [App\Http\Controllers\CreativeModeController::class, 'generate'])->name('creative.generate');
-Route::post('/creative-mode/save', [App\Http\Controllers\CreativeModeController::class, 'save'])->name('creative.save');
+Route::post('/creative-mode/generate', [App\Http\Controllers\CreativeModeController::class, 'generate'])->name('creative.generate')->middleware('auth');
+Route::post('/creative-mode/save', [App\Http\Controllers\CreativeModeController::class, 'save'])->name('creative.save')->middleware('auth');
 
 // Rutas del modo Tutor
 // Usamos el middleware feature para proteger todas las rutas del tutor
@@ -163,7 +175,7 @@ Route::get('/refresh-csrf', [LoginController::class, 'refreshToken'])->name('csr
 
 Route::get('/h2', function () {
     return view('home.NewHome');
-})->name('home');
+})->name('home')->middleware(['auth', 'role:admin']);
 
 use App\Http\Controllers\Admin\StaticAudioController;
 use App\Http\Controllers\Admin\UserController;
@@ -255,7 +267,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/notifications/cleanup', [\App\Http\Controllers\NotificationController::class, 'cleanup'])->name('notifications.cleanup');
 
     // Solo para desarrollo
-    Route::post('/notifications/test', [\App\Http\Controllers\NotificationController::class, 'createTest'])->name('notifications.test');
+    Route::post('/notifications/test', [\App\Http\Controllers\NotificationController::class, 'createTest'])->name('notifications.test')->middleware('role:admin');
 });
 
 // Rutas de TypeMaster AI (requieren autenticación)
@@ -302,6 +314,8 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/settings/memory', [\App\Http\Controllers\UserSettingsController::class, 'getMemory'])->name('settings.memory');
     Route::delete('/settings/memory/{id}', [\App\Http\Controllers\UserSettingsController::class, 'deleteFact'])->name('settings.memory.delete');
     Route::delete('/settings/memory', [\App\Http\Controllers\UserSettingsController::class, 'clearMemory'])->name('settings.memory.clear');
+    Route::patch('/settings/memory/{id}', [\App\Http\Controllers\UserSettingsController::class, 'updateFact'])->whereNumber('id')->name('settings.memory.update');
+    Route::put('/settings/memory/extraction', [\App\Http\Controllers\UserSettingsController::class, 'updateMemoryExtraction'])->name('settings.memory.extraction');
 });
 
 // Rutas de Administración - Bitácora de APIs

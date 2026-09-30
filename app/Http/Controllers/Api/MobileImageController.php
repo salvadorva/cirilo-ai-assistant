@@ -4,13 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\AIController;
 use App\Http\Controllers\Controller;
-use App\Models\ApiUsageLog;
 use App\Traits\LogsApiUsage;
-use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use App\Support\AiLog as Log;
 use Illuminate\Support\Facades\Storage;
 
 class MobileImageController extends Controller
@@ -76,7 +74,7 @@ class MobileImageController extends Controller
                 'Authorization' => 'Bearer '.config('services.openai.api_key'),
                 'Content-Type'  => 'application/json',
             ])->timeout(60)->post('https://api.openai.com/v1/chat/completions', [
-                'model' => 'gpt-4o',
+                'model' => config('ai.models.vision'),
                 'messages' => [[
                     'role' => 'user',
                     'content' => [
@@ -110,7 +108,7 @@ class MobileImageController extends Controller
             return response()->json([
                 'analysis'   => $analysis,
                 'image_url'  => Storage::disk('public')->url($permanentPath),
-                'model'      => 'gpt-4o',
+                'model'      => config('ai.models.vision'),
                 'tokens'     => $data['usage'] ?? null,
             ]);
 
@@ -125,21 +123,9 @@ class MobileImageController extends Controller
 
     private function remainingToday($user): ?int
     {
-        if ($user->role && $user->role->name === 'admin') {
-            return null; // sin límite
-        }
+        $quota = app(\App\Services\ImageQuotaService::class);
+        $limit = $quota->limit($user);
 
-        $limit = $user->daily_image_limit ?? 4;
-        if ($limit === 0) {
-            return null;
-        }
-
-        $count = ApiUsageLog::where('user_id', $user->id)
-            ->where('api_type', 'image_generation')
-            ->where('status', 'success')
-            ->whereDate('created_at', Carbon::today())
-            ->count();
-
-        return max(0, $limit - $count);
+        return $limit === null ? null : max(0, $limit - $quota->used($user));
     }
 }

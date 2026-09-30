@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use App\Support\AiLog as Log;
 use Illuminate\Support\Facades\Storage;
 
 class AIExerciseController extends Controller
@@ -114,7 +114,7 @@ class AIExerciseController extends Controller
                 'Authorization' => 'Bearer '.$credentials['api_key'],
                 'Content-Type' => 'application/json',
             ])->post($credentials['base_url'].'/chat/completions', [
-                'model' => 'gpt-4o',
+                'model' => config('ai.models.vision'),
                 'messages' => [
                     ['role' => 'system', 'content' => 'Eres un profesor de inglés especializado en crear ejercicios personalizados.'],
                     ['role' => 'user', 'content' => $prompt],
@@ -223,7 +223,7 @@ class AIExerciseController extends Controller
                 'Authorization' => 'Bearer '.$credentials['api_key'],
                 'Content-Type' => 'application/json',
             ])->post($credentials['base_url'].'/audio/speech', [
-                'model' => 'tts-1',
+                'model' => config('ai.models.tts'),
                 'input' => $text,
                 'voice' => 'echo',
                 'output_format' => 'mp3',

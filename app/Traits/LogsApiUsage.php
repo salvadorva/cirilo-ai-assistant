@@ -4,8 +4,12 @@ namespace App\Traits;
 
 use App\Models\ApiUsageLog;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Log;
+use App\Support\AiLog as Log;
 
+/**
+ * @deprecated Compatibility only. These methods do NOT write usage records.
+ * New integrations must use AiTransport or Laravel Http, observed by AiTelemetry.
+ */
 trait LogsApiUsage
 {
     /**
@@ -20,53 +24,10 @@ trait LogsApiUsage
         string $model,
         array $options = []
     ): ApiUsageLog {
-        $startTime = microtime(true);
-
-        try {
-            $log = ApiUsageLog::create([
-                'user_id' => Auth::id(),
-                'api_provider' => $options['provider'] ?? 'openai',
-                'api_type' => $apiType,
-                'model' => $model,
-                'prompt' => $options['prompt'] ?? null,
-                'prompt_tokens' => $options['prompt_tokens'] ?? 0,
-                'completion_tokens' => $options['completion_tokens'] ?? 0,
-                'total_tokens' => $options['total_tokens'] ?? 0,
-                'estimated_cost' => $options['estimated_cost'] ??
-                    ApiUsageLog::calculateCost(
-                        $model,
-                        $options['prompt_tokens'] ?? 0,
-                        $options['completion_tokens'] ?? 0
-                    ),
-                'status' => $options['status'] ?? 'success',
-                'error_message' => $options['error_message'] ?? null,
-                'response_time_ms' => $options['response_time_ms'] ??
-                    (int) ((microtime(true) - $startTime) * 1000),
-                'ip_address' => request()->ip(),
-                'user_agent' => request()->userAgent(),
-                'metadata' => $options['metadata'] ?? null,
-            ]);
-
-            Log::info('API usage logged', [
-                'log_id' => $log->id,
-                'user_id' => $log->user_id,
-                'api_type' => $apiType,
-                'model' => $model,
-                'cost' => $log->estimated_cost,
-            ]);
-
-            return $log;
-        } catch (\Exception $e) {
-            Log::error('Error logging API usage: '.$e->getMessage());
-
-            // Crear un log mínimo aunque falle
-            return new ApiUsageLog([
-                'api_type' => $apiType,
-                'model' => $model,
-                'status' => 'error',
-                'error_message' => 'Failed to log: '.$e->getMessage(),
-            ]);
-        }
+        // Compatibility shim: AiTelemetry now records each actual HTTP attempt.
+        // Do not persist here: callers also use this after normalization/retries,
+        // which previously caused omissions and would now double-count usage.
+        return new ApiUsageLog(['api_type' => $apiType, 'model' => $model]);
     }
 
     /**

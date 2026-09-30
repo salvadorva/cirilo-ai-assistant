@@ -30,6 +30,14 @@ class SendFocusMessages extends Command
 
     public function handle()
     {
+        // Con el despacho durable activo (reminders:dispatch) este camino legado
+        // queda fuera: nunca procesan la misma ocurrencia a la vez.
+        if (config('reminders.routine_dispatch_enabled')) {
+            $this->info('Rutinas gestionadas por reminders:dispatch; camino legado omitido.');
+
+            return;
+        }
+
         $now = Carbon::now(self::TIMEZONE);
         $this->info("Verificando focus slots [{$now->format('Y-m-d H:i:s')}]...");
 
@@ -55,8 +63,9 @@ class SendFocusMessages extends Command
                 continue;
             }
 
-            // Marcar antes de enviar: el TTS tarda segundos y otro ciclo podría solaparse
-            $slot->update(['last_sent_at' => $now]);
+            // F3-07: last_sent_at solo se marca con el envío aceptado (más abajo). El solapamiento lo
+            // evita withoutOverlapping() en el scheduler; si FCM falla, el siguiente ciclo reintenta
+            // dentro de la ventana de recuperación.
 
             // Slots de solo texto no generan audio; la app muestra la
             // notificación sin botón ▶ y no auto-reproduce
@@ -68,7 +77,7 @@ class SendFocusMessages extends Command
                     $audioUrl = Storage::disk('public')->url($slot->audio_path);
                 } else {
                     $path = sprintf('audio/focus/slot-%d-%s.mp3', $slot->id, substr(md5($slot->message.'|'.$slot->voice), 0, 8));
-                    $audioUrl = $this->tts->generateMp3($slot->message, $slot->voice, $path);
+                    $audioUrl = app(\App\Services\AiTelemetry::class)->forUser($slot->user_id, fn () => $this->tts->generateMp3($slot->message, $slot->voice, $path));
                     if ($audioUrl) {
                         $slot->update(['audio_path' => $path]);
                     } else {
@@ -90,6 +99,7 @@ class SendFocusMessages extends Command
             );
 
             if ($sent) {
+                $slot->update(['last_sent_at' => $now]);
                 $this->line("Mensaje de enfoque enviado: {$slot->title} ({$slot->time})");
                 Log::info('[Focus] Mensaje enviado', ['slot_id' => $slot->id, 'title' => $slot->title, 'audio' => (bool) $audioUrl]);
             } else {

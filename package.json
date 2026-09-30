@@ -3,7 +3,8 @@
     "type": "module",
     "scripts": {
         "dev": "vite",
-        "build": "vite build"
+        "build": "vite build",
+        "test:security": "node --test tests/frontend/*.test.mjs"
     },
     "devDependencies": {
         "axios": "^1.6.4",
@@ -13,7 +14,9 @@
     "dependencies": {
         "@popperjs/core": "^2.11.8",
         "bootstrap": "^5.3.7",
+        "dompurify": "3.4.15",
         "ffmpeg-static": "^5.2.0",
+        "marked": "18.0.13",
         "puppeteer": "^24.10.1"
     }
 }

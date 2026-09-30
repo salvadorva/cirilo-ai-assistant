@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\UserProfileFact;
+use App\Services\MemoryService;
 use App\Services\NextcloudCalendarService;
 use App\Services\TelegramNotificationService;
 use Illuminate\Http\Request;
@@ -120,7 +121,7 @@ class UserSettingsController extends Controller
         $facts = UserProfileFact::where('user_id', $userId)
             ->orderBy('category')
             ->orderBy('key')
-            ->get(['id', 'category', 'key', 'value', 'confidence', 'last_mentioned_at']);
+            ->get(['id', 'category', 'key', 'value', 'confidence', 'source_type', 'source_conversation_id', 'last_mentioned_at']);
 
         $grouped = $facts->groupBy('category')->map(fn ($items) => $items->values());
 
@@ -128,6 +129,7 @@ class UserSettingsController extends Controller
             'success'         => true,
             'facts'           => $grouped,
             'category_labels' => UserProfileFact::CATEGORY_LABELS,
+            'extraction_enabled' => (bool) Auth::user()->memory_extraction_enabled,
         ]);
     }
 
@@ -140,9 +142,35 @@ class UserSettingsController extends Controller
             ->where('user_id', Auth::id())
             ->firstOrFail();
 
-        $fact->delete();
+        MemoryService::forgetFact($fact);
 
         return response()->json(['success' => true]);
+    }
+
+    /**
+     * Edita el valor de un hecho; queda como declaración explícita del usuario (F4-06).
+     */
+    public function updateFact(Request $request, int $id)
+    {
+        $data = $request->validate(['value' => 'required|string|max:500']);
+        $fact = UserProfileFact::where('id', $id)
+            ->where('user_id', Auth::id())
+            ->firstOrFail();
+
+        $fact = MemoryService::editFact($fact, trim($data['value']));
+
+        return response()->json(['success' => true, 'fact' => $fact->only(['id', 'category', 'key', 'value', 'confidence', 'source_type'])]);
+    }
+
+    /**
+     * Activa o desactiva el aprendizaje automático de hechos a partir de las conversaciones.
+     */
+    public function updateMemoryExtraction(Request $request)
+    {
+        $data = $request->validate(['enabled' => 'required|boolean']);
+        Auth::user()->forceFill(['memory_extraction_enabled' => $data['enabled']])->save();
+
+        return response()->json(['success' => true, 'extraction_enabled' => (bool) $data['enabled']]);
     }
 
     /**
@@ -150,7 +178,7 @@ class UserSettingsController extends Controller
      */
     public function clearMemory()
     {
-        UserProfileFact::where('user_id', Auth::id())->delete();
+        MemoryService::forgetAll(Auth::id());
 
         return response()->json(['success' => true, 'message' => 'Memoria eliminada correctamente.']);
     }
