@@ -242,6 +242,9 @@ class AgendaChatTest extends SecurityTestCase
         $this->flushHeaders()->withHeaders(['Authorization' => 'Bearer '.$this->owner->createToken('android')->plainTextToken])
             ->postJson('/api/mobile/chat', ['prompt' => 'Recuérdame llamar a Ana mañana a las 10', 'generateAudio' => false])->assertOk()
             ->assertJsonPath('event_created.title', 'Llamar a Ana')
+            // Compatibilidad con la APK instalada: espera id, title, start_date y all_day.
+            ->assertJsonPath('event_created.start_date', '2026-09-22T10:00:00-06:00')
+            ->assertJsonPath('event_created.all_day', false)
             ->assertJsonPath('agenda.status', 'created');
     }
 }

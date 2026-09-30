@@ -94,8 +94,9 @@ class MobileChatController extends Controller
             'conversation_id' => $conversationModel->id,
             'provider_used'   => $providerUsed,
             'audio_url'       => $audioUrl,
-            // F2-06: la app lee event_created; el backend web lo llama calendar_event_created.
-            'event_created'   => $data['event_created'] ?? $data['calendar_event_created'] ?? null,
+            // F2-06: la app lee event_created con id, title, start_date y all_day (APK instalada:
+            // start_date no puede faltar). Se arma desde el contrato `agenda`.
+            'event_created'   => $this->eventCreated($data),
             'agenda'          => $data['agenda'] ?? null,
             'image_generated' => $imageGenerated,
         ]);
@@ -204,6 +205,18 @@ class MobileChatController extends Controller
                 'conversation_id' => $conversationModel->id,
             ], 500);
         }
+    }
+
+    private function eventCreated(array $data): ?array
+    {
+        $created = $data['calendar_event_created'] ?? null;
+        $event = $data['agenda']['events'][0] ?? null;
+        if (! $created || ! $event || empty($event['start'])) {
+            return null;
+        }
+
+        return ['id' => $created['id'], 'title' => $created['title'], 'start_date' => $event['start'], 'all_day' => (bool) ($event['all_day'] ?? false),
+            'series_id' => $created['series_id'] ?? null, 'count' => $created['count'] ?? 1];
     }
 
     /**
