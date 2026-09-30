@@ -33,6 +33,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Checklist
@@ -151,6 +152,12 @@ fun ChatScreen(
         uri?.let { viewModel.stageImage(it) }
     }
 
+    val editImagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        uri?.let { viewModel.stageImageForEdit(it) }
+    }
+
     val documentPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -241,6 +248,12 @@ fun ChatScreen(
             onPickImage = {
                 viewModel.dismissAttachSheet()
                 imagePicker.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
+            },
+            onEditImage = {
+                viewModel.dismissAttachSheet()
+                editImagePicker.launch(
                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                 )
             },
@@ -568,6 +581,7 @@ private fun TerminalLog(
                     is ChatItem.UserWithImage -> UserImageItem(item)
                     is ChatItem.UserWithDocument -> UserDocumentItem(item)
                     is ChatItem.AssistantImage -> AssistantImageItem(item)
+                    is ChatItem.UserImageEdit -> UserImageEditItem(item)
                     is ChatItem.EventCreated -> EventCreatedItem(item)
                     is ChatItem.AgendaCandidates -> AgendaCandidatesItem(item)
                     is ChatItem.TaskSaved -> TaskSavedItem(item)
@@ -635,6 +649,29 @@ private fun UserImageItem(item: ChatItem.UserWithImage) {
 }
 
 @Composable
+private fun UserImageEditItem(item: ChatItem.UserImageEdit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            buildAnnotatedString {
+                withStyle(SpanStyle(color = CF_Cyan, fontWeight = FontWeight.Bold)) { append("> user: ") }
+                withStyle(SpanStyle(color = CF_Text)) { append("editar imagen: ${item.instruction}") }
+            },
+            fontFamily = mono,
+            fontSize = 12.sp,
+        )
+        AsyncImage(
+            model = item.localUri,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier
+                .size(96.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .border(1.dp, CF_Cyan.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
+        )
+    }
+}
+
+@Composable
 private fun AssistantImageItem(item: ChatItem.AssistantImage) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -647,7 +684,7 @@ private fun AssistantImageItem(item: ChatItem.AssistantImage) {
                     append("> cirilo: ")
                 }
                 withStyle(SpanStyle(color = CF_Dim)) {
-                    append("imagen generada ↓")
+                    append(if (item.edited) "imagen editada ↓ (disponible 7 días)" else "imagen generada ↓")
                 }
             },
             fontFamily = mono,
@@ -923,6 +960,22 @@ private fun StagedChip(staged: StagedAttachment, onClear: () -> Unit) {
                 .padding(start = 6.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
         ) {
             when (staged) {
+                is StagedAttachment.ImageEdit -> {
+                    AsyncImage(
+                        model = staged.uri,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                    )
+                    Text(
+                        "editar: escribí qué cambiar",
+                        color = CF_Green,
+                        fontFamily = mono,
+                        fontSize = 11.sp,
+                    )
+                }
                 is StagedAttachment.Image -> {
                     AsyncImage(
                         model = staged.uri,
@@ -979,6 +1032,7 @@ private fun StagedChip(staged: StagedAttachment, onClear: () -> Unit) {
 private fun AttachSheet(
     onDismiss: () -> Unit,
     onPickImage: () -> Unit,
+    onEditImage: () -> Unit,
     onPickDocument: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1016,6 +1070,20 @@ private fun AttachSheet(
                 icon = Icons.Default.IconImage,
                 accent = CF_Cyan,
                 onClick = onPickImage,
+            )
+            Spacer(Modifier.height(10.dp))
+            AttachOption(
+                label = "❯ edit.image",
+                description = "elegí una foto y escribí qué cambiar",
+                icon = Icons.Default.AutoFixHigh,
+                accent = CF_Green,
+                onClick = onEditImage,
+            )
+            // IE0: consentimiento con aviso de una línea.
+            Text(
+                "la foto se envía a OpenAI para editarla · el resultado se guarda 7 días",
+                color = CF_Dim, fontFamily = mono, fontSize = 10.sp,
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp),
             )
             Spacer(Modifier.height(10.dp))
             AttachOption(

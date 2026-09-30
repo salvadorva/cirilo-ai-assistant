@@ -32,7 +32,8 @@ sealed class ChatItem {
         val pageCount: Int,
         val truncated: Boolean,
     ) : ChatItem()
-    data class AssistantImage(val url: String, val promptUsed: String?) : ChatItem()
+    data class AssistantImage(val url: String, val promptUsed: String?, val edited: Boolean = false) : ChatItem()
+    data class UserImageEdit(val instruction: String, val localUri: Uri) : ChatItem()
     data class EventCreated(
         val title: String,
         val startDate: String?,
@@ -48,6 +49,8 @@ sealed class ChatItem {
 
 sealed class StagedAttachment {
     data class Image(val uri: Uri) : StagedAttachment()
+    /** IE1: imagen elegida para «Editar imagen»; el texto escrito es la instrucción. */
+    data class ImageEdit(val uri: Uri) : StagedAttachment()
     data class Document(
         val filename: String,
         val content: String,
@@ -163,11 +166,16 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val staged = _state.value.staged
         if (_state.value.status != ChatStatus.Ready) return
         if (text.isEmpty() && staged == null) return
+        if (staged is StagedAttachment.ImageEdit && text.length < com.salvadorva.asistente.util.ImageEditSupport.MIN_INSTRUCTION) {
+            setError("Escribe qué quieres cambiar en la imagen.")
+            return
+        }
 
         _state.value = _state.value.copy(inputText = "", staged = null)
 
         when (staged) {
             is StagedAttachment.Image -> sendImageWithQuestion(staged.uri, text)
+            is StagedAttachment.ImageEdit -> editImage(staged.uri, text)
             is StagedAttachment.Document -> sendDocumentWithQuestion(staged, text)
             // En modo conversación, aunque se escriba, Cirilo responde por voz y
             // el loop sigue escuchando después.
@@ -418,6 +426,59 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun dismissAttachSheet() {
         _state.value = _state.value.copy(showAttachSheet = false)
+    }
+
+    fun stageImageForEdit(uri: Uri) {
+        _state.value = _state.value.copy(
+            staged = StagedAttachment.ImageEdit(uri),
+            showAttachSheet = false,
+            errorMessage = null,
+        )
+    }
+
+    /** IE1: envía la foto y la instrucción al modelo de edición y muestra el resultado (privado, 7 días). */
+    private fun editImage(uri: Uri, instruction: String) {
+        val context = getApplication<Application>()
+        _state.value = _state.value.copy(
+            items = _state.value.items + ChatItem.UserImageEdit(instruction, uri),
+            messages = _state.value.messages + ChatMessage(role = "user", content = "[Editar imagen] $instruction"),
+            status = ChatStatus.Thinking,
+            errorMessage = null,
+        )
+        val key = java.util.UUID.randomUUID().toString()
+        viewModelScope.launch {
+            try {
+                val bytes = withContext(Dispatchers.IO) { com.salvadorva.asistente.util.ImageEditSupport.prepare(context, uri) }
+                    ?: return@launch setError("No pude leer esa imagen. Prueba con otra foto.")
+                val part = MultipartBody.Part.createFormData("image", "foto.jpg", bytes.toRequestBody("image/jpeg".toMediaTypeOrNull()))
+                val response = ApiClient.imageEditApi.edit(
+                    key, part, instruction.toRequestBody("text/plain".toMediaTypeOrNull()),
+                    _state.value.conversationId?.toString()?.toRequestBody("text/plain".toMediaTypeOrNull()),
+                )
+                val body = response.body()
+                if (!response.isSuccessful || body?.id == null) {
+                    val error = response.errorBody()?.string()?.let {
+                        runCatching { com.google.gson.Gson().fromJson(it, com.salvadorva.asistente.network.models.ImageEditResponse::class.java) }.getOrNull()
+                    }
+                    return@launch setError(com.salvadorva.asistente.util.ImageEditSupport.errorMessage(response.code(), error?.code, error?.message))
+                }
+                val file = withContext(Dispatchers.IO) {
+                    val res = ApiClient.imageEditApi.result(body.id)
+                    val stream = res.body()?.byteStream() ?: return@withContext null
+                    val dir = java.io.File(context.cacheDir, "image-edits").apply { mkdirs() }
+                    java.io.File(dir, "${body.id}.png").also { f -> stream.use { input -> f.outputStream().use { input.copyTo(it) } } }
+                } ?: return@launch setError("La imagen se editó, pero no se pudo descargar. Intenta de nuevo.")
+                val assistantMsg = ChatMessage(role = "assistant", content = "[Imagen editada]")
+                _state.value = _state.value.copy(
+                    items = _state.value.items + ChatItem.AssistantImage(url = android.net.Uri.fromFile(file).toString(), promptUsed = instruction, edited = true),
+                    messages = _state.value.messages + assistantMsg,
+                    conversationId = body.conversation_id ?: _state.value.conversationId,
+                    status = ChatStatus.Ready,
+                )
+            } catch (e: Exception) {
+                setError("Sin conexión o error al editar la imagen.")
+            }
+        }
     }
 
     fun stageImage(uri: Uri) {

@@ -51,4 +51,5 @@ object ApiClient {
     val contextualReminderApi: ContextualReminderApi by lazy { retrofit.create(ContextualReminderApi::class.java) }
     val todayApi: TodayApi by lazy { retrofit.create(TodayApi::class.java) }
     val memoryApi: MemoryApi by lazy { retrofit.create(MemoryApi::class.java) }
+    val imageEditApi: ImageEditApi by lazy { retrofit.create(ImageEditApi::class.java) }
 }
