@@ -8,6 +8,7 @@ import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Streaming
 
 /** Endpoints Sanctum de la sección 1 y 3–5 del contrato. La app nunca crea recordatorios. */
 interface ContextualReminderApi {
@@ -33,6 +34,11 @@ interface ContextualReminderApi {
 
     @GET("api/mobile/contextual-reminders/{id}")
     suspend fun detail(@Path("id") id: String): Response<ReminderDetail>
+
+    /** Audio privado del recordatorio (solo si `audio_ready`); nunca se reproduce solo. */
+    @Streaming
+    @GET("api/mobile/contextual-reminders/{id}/audio")
+    suspend fun audio(@Path("id") id: String): Response<okhttp3.ResponseBody>
 
     /** `action` = complete | cancel | snooze. */
     @POST("api/mobile/contextual-reminders/{id}/{action}")

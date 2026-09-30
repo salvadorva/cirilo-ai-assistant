@@ -397,6 +397,7 @@ private fun DetailSheet(
             event.description?.takeIf { it.isNotBlank() }?.let { desc ->
                 Text(desc, color = CF_Dim, fontFamily = mono, fontSize = 12.sp, lineHeight = 18.sp)
             }
+            event.notifications?.takeIf { it.isNotEmpty() }?.let { notices -> NoticesBlock(notices) }
 
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -408,6 +409,22 @@ private fun DetailSheet(
                     onClick = { if (confirmDelete) onDelete() else confirmDelete = true },
                 )
             }
+        }
+    }
+}
+
+/** F3: estado de los avisos por canal, con el texto del servidor. */
+@Composable
+private fun NoticesBlock(notices: List<com.salvadorva.asistente.network.models.EventNotice>) {
+    val kinds = mapOf("reminder" to "recordatorio", "start" to "inicio")
+    val channels = mapOf("internal" to "Cirilo", "email" to "correo", "telegram" to "Telegram", "fcm" to "teléfono")
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text("// avisos", color = CF_Dim, fontFamily = mono, fontSize = 11.sp, letterSpacing = 1.5.sp)
+        notices.forEach { n ->
+            Text(
+                "${kinds[n.kind] ?: n.kind ?: ""} · ${channels[n.channel] ?: n.channel ?: ""}: ${n.label ?: n.status ?: ""}",
+                color = CF_Text, fontFamily = mono, fontSize = 11.5.sp,
+            )
         }
     }
 }

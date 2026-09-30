@@ -19,8 +19,21 @@ data class AgendaEvent(
     val notified: Boolean = false,
     val recurrence_type: String? = null,
     val recurrence_end_date: String? = null,
-    val series_id: Int? = null,
+    // UUID en el backend: con Int, Gson fallaba al leer cualquier serie.
+    val series_id: String? = null,
     val nextcloud_synced: Boolean = false,
+    /** F3: estado de cada aviso del horario vigente (solo en GET /agenda/events/{id}). */
+    val notifications: List<EventNotice>? = null,
+)
+
+/** Aviso por canal. «Aceptado por el proveedor» nunca significa recibido ni leído. */
+data class EventNotice(
+    val kind: String? = null,      // reminder | start
+    val channel: String? = null,   // internal | email | telegram | fcm
+    val status: String? = null,
+    val label: String? = null,
+    val attempts: Int? = null,
+    val accepted_at: String? = null,
 )
 
 /** Wrapper de la respuesta de index/upcoming: { "events": [...] }. */

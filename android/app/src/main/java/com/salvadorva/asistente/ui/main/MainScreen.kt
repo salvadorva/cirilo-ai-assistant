@@ -126,7 +126,10 @@ fun MainScreen(
                 .fillMaxSize()
         ) {
             when (selectedKey) {
-                "Hoy"     -> TodayScreen(onOpenChat = { selectedKey = "Chat" })
+                "Hoy"     -> TodayScreen(
+                    onOpenChat = { selectedKey = "Chat" },
+                    onOpenEvent = { id -> agendaDeepLinkEventId = id; selectedKey = "Agenda" },
+                )
                 "Chat"    -> ChatScreen(
                     focusMessage = focusDeepLink,
                     onFocusConsumed = { focusDeepLink = null },

@@ -52,7 +52,7 @@ object ReminderPushParser {
         val expiresAt = parseUtc(data["expires_at"]) ?: return PushParseResult.Invalid("expires_at")
         if (expiresAt <= scheduledAt) return PushParseResult.Invalid("expires_at")
 
-        // audio_ready se ignora a propósito: piloto solo texto, nunca se reproduce ni descarga audio.
+        // audio_ready se ignora en el push: el audio solo se escucha bajo petición desde el detalle (sin autoplay).
         return PushParseResult.Valid(
             ReminderPush(
                 reminderId = reminderId,

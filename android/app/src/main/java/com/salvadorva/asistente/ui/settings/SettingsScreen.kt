@@ -47,6 +47,10 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsState()
+    var showMemory by remember { mutableStateOf(false) }
+    if (showMemory) {
+        com.salvadorva.asistente.ui.memory.MemoryDialog(onDismiss = { showMemory = false })
+    }
 
     Column(
         modifier = Modifier
@@ -83,6 +87,9 @@ fun SettingsScreen(
             onClaim = viewModel::confirmClaimInstallation,
             onRetryRegistration = viewModel::retryRegistration,
         )
+
+        SectionLabel("// memory")
+        MemoryCard(onOpen = { showMemory = true })
 
         Spacer(Modifier.height(8.dp))
 
@@ -219,6 +226,27 @@ private fun VoiceConfigCard(
                     onClick = { onSelectVoice("nova") },
                 )
             }
+        }
+    }
+}
+
+/** F4-06: acceso a los controles de memoria. */
+@Composable
+private fun MemoryCard(onOpen: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(CF_Green.copy(alpha = 0.06f))
+            .border(1.dp, CF_Green.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+            .clickable(onClick = onOpen)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("❯ lo que cirilo sabe de ti", color = CF_Text, fontFamily = mono, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(2.dp))
+            Text("ver, corregir u olvidar datos; apagar el aprendizaje", color = CF_Dim, fontFamily = mono, fontSize = 11.sp)
         }
     }
 }

@@ -1,5 +1,7 @@
 package com.salvadorva.asistente.ui.reminders
 
+import kotlinx.coroutines.launch
+import com.salvadorva.asistente.reminders.ReminderAudioPlayer
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -88,6 +90,8 @@ private fun LoadedContent(s: ReminderUiState.Loaded, vm: ContextualReminderViewM
         Text("> $it", color = CF_Cyan, fontFamily = mono, fontSize = 14.sp)
     }
 
+    if (d.isPending && d.audio_ready == true) ListenButton(d.id)
+
     s.notice?.let {
         Text(
             it,
@@ -116,6 +120,28 @@ private fun LoadedContent(s: ReminderUiState.Loaded, vm: ContextualReminderViewM
     }
 
     CloseRow(onDismiss)
+}
+
+/** Audio bajo petición: nunca se reproduce solo; se detiene al cerrar el diálogo. */
+@Composable
+private fun ListenButton(reminderId: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var playing by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var failed by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.DisposableEffect(reminderId) { onDispose { ReminderAudioPlayer.stop() } }
+    ActionButton(if (playing) "■ Detener" else "▶ Escuchar", CF_Cyan, true, Modifier.fillMaxWidth()) {
+        if (playing) {
+            ReminderAudioPlayer.stop(); playing = false
+        } else {
+            scope.launch {
+                failed = false
+                playing = runCatching { ReminderAudioPlayer.play(context, reminderId) { playing = false } }.getOrDefault(false)
+                failed = !playing
+            }
+        }
+    }
+    if (failed) Text("> el audio no está disponible; el texto sigue siendo el recordatorio", color = CF_Dim, fontFamily = mono, fontSize = 11.sp)
 }
 
 @Composable

@@ -24,6 +24,7 @@ data class EventEditor(
     val endMillis: Long = defaultStart() + 3_600_000L,
     val allDay: Boolean = false,
     val reminderMinutes: Int = 30,
+    val idempotencyKey: String = java.util.UUID.randomUUID().toString(),
 ) {
     val isEditing: Boolean get() = id != null
     val isValid: Boolean get() = title.isNotBlank() && endMillis >= startMillis
@@ -136,7 +137,7 @@ class AgendaViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val res = if (editor.id == null) {
-                    api.create(body)
+                    api.create(editor.idempotencyKey, body)
                 } else {
                     api.update(editor.id, body)
                 }
@@ -162,6 +163,16 @@ class AgendaViewModel : ViewModel() {
 
     fun openDetail(event: AgendaEvent) {
         _state.value = _state.value.copy(detail = event)
+        // El listado no trae el estado de los avisos: se pide el detalle al servidor.
+        viewModelScope.launch {
+            try {
+                val res = api.show(event.id)
+                val fresh = res.body()
+                if (res.isSuccessful && fresh != null && _state.value.detail?.id == event.id) {
+                    _state.value = _state.value.copy(detail = fresh)
+                }
+            } catch (_: Exception) { /* se muestra lo que ya había */ }
+        }
     }
 
     fun closeDetail() {
