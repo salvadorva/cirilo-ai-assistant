@@ -97,3 +97,11 @@ Schedule::command('reminders:purge --apply')
     ->withoutOverlapping()
     ->when(fn () => (bool) config('reminders.retention_purge_enabled'))
     ->description('Retención de recordatorios contextuales (contenido 7 días, metadatos 30)');
+
+// RC5: sin worker permanente en el servidor, el scheduler vacía la cola cada minuto (despacho de
+// recordatorios y audio). Termina al quedar vacía o a los 50 s; los reintentos los maneja el despachador.
+Schedule::command('queue:work --stop-when-empty --max-time=50 --tries=1 --timeout=45')
+    ->everyMinute()
+    ->withoutOverlapping(5)
+    ->runInBackground()
+    ->description('Procesar la cola (recordatorios contextuales)');
