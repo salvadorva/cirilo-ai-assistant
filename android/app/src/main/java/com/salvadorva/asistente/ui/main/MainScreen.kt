@@ -10,6 +10,7 @@ import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,12 +27,14 @@ import com.salvadorva.asistente.ui.agenda.AgendaScreen
 import com.salvadorva.asistente.ui.chat.ChatScreen
 import com.salvadorva.asistente.ui.reminders.ContextualReminderDialog
 import com.salvadorva.asistente.ui.settings.SettingsScreen
+import com.salvadorva.asistente.ui.today.TodayScreen
 import com.salvadorva.asistente.ui.theme.CIR_Primary
 import com.salvadorva.asistente.ui.theme.CIR_PrimaryLight
 
 private data class TabItem(val key: String, val icon: ImageVector, val label: String)
 
 private val tabs = listOf(
+    TabItem("Hoy",     Icons.Default.WbSunny,        "Hoy"),
     TabItem("Chat",    Icons.Default.Forum,          "Chat"),
     TabItem("Agenda",  Icons.Default.CalendarMonth,  "Agenda"),
     TabItem("Ajustes", Icons.Default.Settings,       "Ajustes"),
@@ -46,7 +49,8 @@ fun MainScreen(
     onDeepLinkHandled: () -> Unit = {},
     onLogout: () -> Unit,
 ) {
-    var selectedKey by remember { mutableStateOf("Chat") }
+    // F6: la app abre en «Hoy»; los deep links siguen llevando a su pestaña.
+    var selectedKey by remember { mutableStateOf("Hoy") }
     var agendaDeepLinkEventId by remember { mutableStateOf<Int?>(null) }
     var focusDeepLink by remember { mutableStateOf<DeepLink.Focus?>(null) }
     var reminderDeepLink by remember { mutableStateOf<DeepLink.ContextualReminder?>(null) }
@@ -122,6 +126,7 @@ fun MainScreen(
                 .fillMaxSize()
         ) {
             when (selectedKey) {
+                "Hoy"     -> TodayScreen(onOpenChat = { selectedKey = "Chat" })
                 "Chat"    -> ChatScreen(
                     focusMessage = focusDeepLink,
                     onFocusConsumed = { focusDeepLink = null },

@@ -49,4 +49,5 @@ object ApiClient {
     val agendaApi: AgendaApi by lazy { retrofit.create(AgendaApi::class.java) }
     val focusSlotApi: FocusSlotApi by lazy { retrofit.create(FocusSlotApi::class.java) }
     val contextualReminderApi: ContextualReminderApi by lazy { retrofit.create(ContextualReminderApi::class.java) }
+    val todayApi: TodayApi by lazy { retrofit.create(TodayApi::class.java) }
 }

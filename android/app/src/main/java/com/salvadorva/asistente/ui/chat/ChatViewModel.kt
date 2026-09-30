@@ -33,7 +33,17 @@ sealed class ChatItem {
         val truncated: Boolean,
     ) : ChatItem()
     data class AssistantImage(val url: String, val promptUsed: String?) : ChatItem()
-    data class EventCreated(val title: String, val startDate: String, val allDay: Boolean) : ChatItem()
+    data class EventCreated(
+        val title: String,
+        val startDate: String?,
+        val allDay: Boolean,
+        val label: String = "✓ evento agendado",
+        val count: Int = 1,
+    ) : ChatItem()
+    /** Cirilo pregunta a cuál evento se refiere: se muestran los candidatos (F2-07). */
+    data class AgendaCandidates(val candidates: List<Candidate>) : ChatItem()
+    data class Candidate(val title: String, val startDate: String?, val allDay: Boolean)
+    data class TaskSaved(val title: String, val dueDate: String?, val label: String) : ChatItem()
 }
 
 sealed class StagedAttachment {
@@ -221,6 +231,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 // habilitó voz OpenAI. En caso contrario, TTS nativo Android.
                 val wantOpenAiAudio = viaVoice && useOpenAiVoice
                 val response = ApiClient.chatApi.chat(
+                    java.util.UUID.randomUUID().toString(),
                     ChatRequest(
                         prompt = text,
                         conversation_id = _state.value.conversationId,
@@ -238,9 +249,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             body.image_generated?.let { gen ->
                                 add(ChatItem.AssistantImage(url = gen.url, promptUsed = gen.prompt_used))
                             }
-                            body.event_created?.let { ev ->
-                                add(ChatItem.EventCreated(ev.title, ev.start_date, ev.all_day))
-                            }
+                            addAll(ChatCards.from(body))
                         }
                         _state.value = _state.value.copy(
                             items = _state.value.items + newItems,
@@ -309,6 +318,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     .dropLast(1)
                     .takeLast(6)
                 val response = ApiClient.chatApi.chat(
+                    java.util.UUID.randomUUID().toString(),
                     ChatRequest(
                         prompt = fullPrompt,
                         conversation_id = _state.value.conversationId,
@@ -324,9 +334,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         body.image_generated?.let { gen ->
                             add(ChatItem.AssistantImage(url = gen.url, promptUsed = gen.prompt_used))
                         }
-                        body.event_created?.let { ev ->
-                            add(ChatItem.EventCreated(ev.title, ev.start_date, ev.all_day))
-                        }
+                        addAll(ChatCards.from(body))
                     }
                     _state.value = _state.value.copy(
                         items = _state.value.items + newItems,

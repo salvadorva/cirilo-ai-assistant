@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.EventAvailable
 import androidx.compose.material.icons.filled.Image as IconImage
 import androidx.compose.material.icons.filled.Mic
@@ -568,6 +569,8 @@ private fun TerminalLog(
                     is ChatItem.UserWithDocument -> UserDocumentItem(item)
                     is ChatItem.AssistantImage -> AssistantImageItem(item)
                     is ChatItem.EventCreated -> EventCreatedItem(item)
+                    is ChatItem.AgendaCandidates -> AgendaCandidatesItem(item)
+                    is ChatItem.TaskSaved -> TaskSavedItem(item)
                 }
             }
             if (status == ChatStatus.Listening) ListeningLine()
@@ -763,10 +766,7 @@ private fun UserDocumentItem(item: ChatItem.UserWithDocument) {
 
 @Composable
 private fun EventCreatedItem(item: ChatItem.EventCreated) {
-    val whenLabel = if (item.allDay)
-        com.salvadorva.asistente.util.formatLocalDate(item.startDate)
-    else
-        com.salvadorva.asistente.util.formatLocalDateTime(item.startDate)
+    val whenLabel = eventWhen(item.startDate, item.allDay) + if (item.count > 1) " · ${item.count} eventos en la serie" else ""
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -778,9 +778,52 @@ private fun EventCreatedItem(item: ChatItem.EventCreated) {
     ) {
         Icon(Icons.Default.EventAvailable, null, tint = CF_Green, modifier = Modifier.size(16.dp))
         Column {
-            Text("✓ evento agendado", color = CF_Green, fontFamily = mono, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text(item.label, color = CF_Green, fontFamily = mono, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             Text(item.title, color = CF_Text, fontFamily = mono, fontSize = 12.sp)
             Text(whenLabel, color = CF_Dim, fontFamily = mono, fontSize = 10.5.sp)
+        }
+    }
+}
+
+private fun eventWhen(startDate: String?, allDay: Boolean): String = when {
+    startDate.isNullOrBlank() -> ""
+    allDay -> com.salvadorva.asistente.util.formatLocalDate(startDate) + " · todo el día"
+    else -> com.salvadorva.asistente.util.formatLocalDateTime(startDate)
+}
+
+/** Cirilo pregunta a cuál evento se refiere; nada se cambió todavía. */
+@Composable
+private fun AgendaCandidatesItem(item: ChatItem.AgendaCandidates) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .border(1.dp, CF_Cyan.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Text("¿cuál de estos?", color = CF_Cyan, fontFamily = mono, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        item.candidates.forEach { c ->
+            Text("• ${c.title}  ${eventWhen(c.startDate, c.allDay)}", color = CF_Text, fontFamily = mono, fontSize = 11.5.sp)
+        }
+    }
+}
+
+@Composable
+private fun TaskSavedItem(item: ChatItem.TaskSaved) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(CF_Green.copy(alpha = 0.08f))
+            .border(1.dp, CF_Green.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Icon(Icons.Default.Checklist, null, tint = CF_Green, modifier = Modifier.size(16.dp))
+        Column {
+            Text(item.label, color = CF_Green, fontFamily = mono, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text(item.title, color = CF_Text, fontFamily = mono, fontSize = 12.sp)
+            Text(item.dueDate?.let { "fecha límite $it" } ?: "sin fecha · en la pestaña Hoy", color = CF_Dim, fontFamily = mono, fontSize = 10.5.sp)
         }
     }
 }
