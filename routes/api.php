@@ -53,6 +53,9 @@ Route::prefix('mobile')->middleware('throttle:60,1')->group(function () {
         Route::post('/images/generate', [MobileImageController::class, 'generate'])
             ->middleware('image.limit');
         Route::post('/images/analyze', [MobileImageController::class, 'analyze']);
+        // IE1: editar imagen (apagado con IMAGE_EDIT_ENABLED=false)
+        Route::post('/images/edit', [\App\Http\Controllers\Api\MobileImageEditController::class, 'edit']);
+        Route::get('/images/edits/{id}', [\App\Http\Controllers\Api\MobileImageEditController::class, 'show'])->whereUuid('id');
 
         // Agenda
         Route::get('/agenda/events', [MobileAgendaController::class, 'index']);

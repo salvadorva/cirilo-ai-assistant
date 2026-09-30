@@ -103,6 +103,9 @@ class GuardAiRequests
         if ($class === 'MobileChatController') {
             return 'chat';
         }
+        if ($class === 'MobileImageEditController') {
+            return $method === 'edit' ? 'image' : 'resource';
+        }
         if (in_array($class, ['MobileImageController', 'ImageAnalysisController'])) {
             return str_starts_with($method, 'save') ? 'conversation' : 'image';
         }

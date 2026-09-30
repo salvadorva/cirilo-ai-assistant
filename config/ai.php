@@ -56,4 +56,15 @@ return [
     'web_search' => [
         'context_size' => env('AI_WEB_SEARCH_CONTEXT', 'medium'),
     ],
+    // IE1: edición de imágenes (solo app). Decisiones de Salva del 30/09/2026: calidad media, tamaño
+    // automático, resultado 7 días, cuota compartida con la generación. Apagado hasta la prueba real.
+    'image_edit' => [
+        'enabled' => (bool) env('IMAGE_EDIT_ENABLED', false),
+        'model' => 'gpt-image-1',
+        'quality' => 'medium',
+        'size' => 'auto',
+        'timeout_seconds' => 120,
+        'max_side' => 2048,
+        'retention_days' => 7,
+    ],
 ];

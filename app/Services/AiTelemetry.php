@@ -37,6 +37,11 @@ class AiTelemetry
 
     public function begin(string $url, array $data): ?array
     {
+        // Peticiones multipart (p. ej. /images/edits): Laravel entrega una lista de partes.
+        if (array_is_list($data) && isset($data[0]['name']) && array_key_exists('contents', $data[0])) {
+            $data = collect($data)->filter(fn ($part) => is_scalar($part['contents'] ?? null) && ! isset($part['filename']))
+                ->mapWithKeys(fn ($part) => [$part['name'] => $part['contents']])->all();
+        }
         $provider = match (parse_url($url, PHP_URL_HOST)) {
             'api.openai.com' => 'openai', 'api.x.ai' => 'grok', default => null,
         };

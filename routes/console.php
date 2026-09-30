@@ -105,3 +105,9 @@ Schedule::command('queue:work --stop-when-empty --max-time=50 --tries=1 --timeou
     ->withoutOverlapping(5)
     ->runInBackground()
     ->description('Procesar la cola (recordatorios contextuales)');
+
+// IE1: las imágenes editadas se guardan 7 días.
+Schedule::command('images:purge-edits')
+    ->dailyAt('03:50')
+    ->withoutOverlapping()
+    ->description('Borrar imágenes editadas vencidas');
