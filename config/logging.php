@@ -57,7 +57,9 @@ return [
             'path' => storage_path('logs/ai.log'),
             'level' => 'info',
             'days' => config('ai_security.log_retention_days', 14),
-            'permission' => 0600,
+            // 0660: PHP-FPM (apache) y el scheduler (otro usuario del grupo apache) escriben en el
+            // mismo archivo diario; con 0600 lo crea uno y el otro falla con error 500.
+            'permission' => 0660,
             'locking' => true,
         ],
 
