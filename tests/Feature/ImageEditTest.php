@@ -24,7 +24,7 @@ class ImageEditTest extends SecurityTestCase
     {
         parent::setUp();
         Carbon::setTestNow(Carbon::parse('2026-09-30 10:00:00', 'America/Guatemala'));
-        Storage::fake('local');
+        Storage::fake('image_edits');
         config(['services.openai.api_key' => 'fake-test-key', 'ai.image_edit.enabled' => true]);
         $this->owner = $this->user();
     }
@@ -101,7 +101,7 @@ class ImageEditTest extends SecurityTestCase
                 && max(imagesx($image), imagesy($image)) <= 2048 && str_contains($parts['prompt']['contents'], 'sombrero');
         });
         // Solo se guarda el resultado; el original nunca toca el disco.
-        $this->assertCount(1, Storage::disk('local')->allFiles());
+        $this->assertCount(1, Storage::disk('image_edits')->allFiles());
 
         $this->fetchResult($response->json('url'))->assertOk()->assertHeader('Content-Type', 'image/png')
             ->assertHeader('Cache-Control', 'no-store, private');
@@ -181,7 +181,7 @@ class ImageEditTest extends SecurityTestCase
         Carbon::setTestNow(now()->addDays(8));
         $this->artisan('images:purge-edits')->assertExitCode(0);
 
-        $this->assertCount(0, Storage::disk('local')->allFiles());
+        $this->assertCount(0, Storage::disk('image_edits')->allFiles());
         $this->assertSame('expired', ImageEdit::sole()->status);
         $this->fetchResult($url)->assertStatus(410);
     }

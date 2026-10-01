@@ -36,6 +36,19 @@ return [
             'throw' => false,
         ],
 
+        // Ediciones de imagen (privadas, 7 días). PHP-FPM escribe como apache y el scheduler
+        // purga como otro usuario del grupo apache: carpetas y archivos con permiso de grupo.
+        'image_edits' => [
+            'driver' => 'local',
+            'root' => storage_path('app'),
+            'visibility' => 'private',
+            'permissions' => [
+                'file' => ['public' => 0664, 'private' => 0660],
+                'dir' => ['public' => 0775, 'private' => 02770],
+            ],
+            'throw' => false,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

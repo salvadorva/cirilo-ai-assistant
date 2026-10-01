@@ -28,7 +28,7 @@ use Illuminate\Support\Facades\Storage;
  */
 class ImageEditService
 {
-    public const DISK = 'local';
+    public const DISK = 'image_edits';
 
     public function __construct(private ImageQuotaService $quota) {}
 
@@ -75,8 +75,12 @@ class ImageEditService
     {
         $count = 0;
         ImageEdit::where('status', 'completed')->where('expires_at', '<', now())->each(function (ImageEdit $edit) use (&$count) {
-            if ($edit->path) {
-                Storage::disk(self::DISK)->delete($edit->path);
+            $disk = Storage::disk(self::DISK);
+            if ($edit->path && $disk->exists($edit->path) && ! $disk->delete($edit->path)) {
+                // Sin permiso para borrar: se reintenta en la próxima purga en lugar de perder el rastro.
+                Log::warning('ImageEdit: no se pudo borrar un resultado vencido', ['edit_id' => $edit->id]);
+
+                return;
             }
             $edit->update(['status' => 'expired', 'path' => null]);
             $count++;
@@ -108,6 +112,7 @@ class ImageEditService
         if ($response->successful() && ($b64 = $response->json('data.0.b64_json'))) {
             $path = "images/edits/{$user->id}/{$edit->id}.png";
             Storage::disk(self::DISK)->put($path, base64_decode($b64));
+            $this->shareWithGroup($path);
             $edit->update(['status' => 'completed', 'path' => $path, 'expires_at' => now()->addDays((int) $config['retention_days'])]);
             $conversation = $this->persistConversation($edit, $user, $instruction);
 
@@ -122,6 +127,19 @@ class ImageEditService
         Log::warning('ImageEdit: el proveedor respondió error', ['edit_id' => $edit->id, 'status' => $response->status(), 'code' => $code]);
 
         return $this->fail($edit, 'failed', 'provider_error', $response->status() >= 500 ? 502 : 422, 'No se pudo editar la imagen. Intenta de nuevo.');
+    }
+
+    /**
+     * El umask de PHP-FPM recorta los permisos de las carpetas nuevas; sin escritura de grupo el
+     * scheduler (otro usuario del grupo) no podría borrar el resultado al vencer.
+     */
+    private function shareWithGroup(string $path): void
+    {
+        $disk = Storage::disk(self::DISK);
+        for ($dir = dirname($path); $dir !== '.' && $dir !== 'images'; $dir = dirname($dir)) {
+            @chmod($disk->path($dir), 02770);
+        }
+        @chmod($disk->path($path), 0660);
     }
 
     private function replay(ImageEdit $edit, string $hash): JsonResponse
