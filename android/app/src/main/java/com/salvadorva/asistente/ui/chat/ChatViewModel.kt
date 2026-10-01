@@ -70,7 +70,11 @@ data class ChatUiState(
     val staged: StagedAttachment? = null,
     val attachingDocument: Boolean = false,
     val conversationMode: Boolean = false, // modo manos libres: escucha → responde → vuelve a escuchar
+    val refining: RefineTarget? = null, // ajustes guiados sobre la última imagen editada
 )
+
+/** Imagen editada que el próximo mensaje ajusta, y cuántos ajustes le quedan. */
+data class RefineTarget(val editId: String, val remaining: Int)
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -171,7 +175,23 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        _state.value = _state.value.copy(inputText = "", staged = null)
+        val refining = _state.value.refining
+        if (staged == null && refining != null) {
+            if (com.salvadorva.asistente.util.ImageEditSupport.closesRefine(text)) {
+                // «Quedó bien», «gracias»…: se cierran los ajustes y sigue la conversación normal.
+                _state.value = _state.value.copy(refining = null)
+            } else if (text.length < com.salvadorva.asistente.util.ImageEditSupport.MIN_INSTRUCTION) {
+                setError("Escribe qué quieres ajustar en la imagen.")
+                return
+            } else {
+                _state.value = _state.value.copy(inputText = "")
+                refineImage(refining, text)
+                return
+            }
+        }
+
+        // Un adjunto nuevo abre otra conversación sobre otra cosa: se cierran los ajustes pendientes.
+        _state.value = _state.value.copy(inputText = "", staged = null, refining = if (staged != null) null else _state.value.refining)
 
         when (staged) {
             is StagedAttachment.Image -> sendImageWithQuestion(staged.uri, text)
@@ -455,30 +475,73 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     key, part, instruction.toRequestBody("text/plain".toMediaTypeOrNull()),
                     _state.value.conversationId?.toString()?.toRequestBody("text/plain".toMediaTypeOrNull()),
                 )
-                val body = response.body()
-                if (!response.isSuccessful || body?.id == null) {
-                    val error = response.errorBody()?.string()?.let {
-                        runCatching { com.google.gson.Gson().fromJson(it, com.salvadorva.asistente.network.models.ImageEditResponse::class.java) }.getOrNull()
-                    }
-                    return@launch setError(com.salvadorva.asistente.util.ImageEditSupport.errorMessage(response.code(), error?.code, error?.message))
-                }
-                val file = withContext(Dispatchers.IO) {
-                    val res = ApiClient.imageEditApi.result(body.id)
-                    val stream = res.body()?.byteStream() ?: return@withContext null
-                    val dir = java.io.File(context.cacheDir, "image-edits").apply { mkdirs() }
-                    java.io.File(dir, "${body.id}.png").also { f -> stream.use { input -> f.outputStream().use { input.copyTo(it) } } }
-                } ?: return@launch setError("La imagen se editó, pero no se pudo descargar. Intenta de nuevo.")
-                val assistantMsg = ChatMessage(role = "assistant", content = "[Imagen editada]")
-                _state.value = _state.value.copy(
-                    items = _state.value.items + ChatItem.AssistantImage(url = android.net.Uri.fromFile(file).toString(), promptUsed = instruction, edited = true),
-                    messages = _state.value.messages + assistantMsg,
-                    conversationId = body.conversation_id ?: _state.value.conversationId,
-                    status = ChatStatus.Ready,
-                )
+                showEditResult(response, instruction)
             } catch (e: Exception) {
                 setError("Sin conexión o error al editar la imagen.")
             }
         }
+    }
+
+    /** Ajuste guiado: aplica el cambio sobre la última imagen editada, sin volver a subir la foto. */
+    private fun refineImage(target: RefineTarget, instruction: String) {
+        _state.value = _state.value.copy(
+            items = _state.value.items + ChatItem.Text(ChatMessage(role = "user", content = instruction)),
+            messages = _state.value.messages + ChatMessage(role = "user", content = "[Ajustar imagen] $instruction"),
+            status = ChatStatus.Thinking,
+            errorMessage = null,
+        )
+        val key = java.util.UUID.randomUUID().toString()
+        viewModelScope.launch {
+            try {
+                val response = ApiClient.imageEditApi.refine(
+                    key, target.editId, com.salvadorva.asistente.network.models.ImageRefineRequest(instruction),
+                )
+                showEditResult(response, instruction)
+            } catch (e: Exception) {
+                setError("Sin conexión o error al ajustar la imagen.")
+            }
+        }
+    }
+
+    /** Descarga el resultado, lo muestra con el mensaje guía de Cirilo y deja listo el siguiente ajuste. */
+    private suspend fun showEditResult(
+        response: retrofit2.Response<com.salvadorva.asistente.network.models.ImageEditResponse>,
+        instruction: String,
+    ) {
+        val context = getApplication<Application>()
+        val body = response.body()
+        if (!response.isSuccessful || body?.id == null) {
+            val error = response.errorBody()?.string()?.let {
+                runCatching { com.google.gson.Gson().fromJson(it, com.salvadorva.asistente.network.models.ImageEditResponse::class.java) }.getOrNull()
+            }
+            if (error?.code in com.salvadorva.asistente.util.ImageEditSupport.REFINE_TERMINAL_CODES) {
+                _state.value = _state.value.copy(refining = null)
+            }
+            return setError(com.salvadorva.asistente.util.ImageEditSupport.errorMessage(response.code(), error?.code, error?.message))
+        }
+        val file = withContext(Dispatchers.IO) {
+            val res = ApiClient.imageEditApi.result(body.id)
+            val stream = res.body()?.byteStream() ?: return@withContext null
+            val dir = java.io.File(context.cacheDir, "image-edits").apply { mkdirs() }
+            java.io.File(dir, "${body.id}.png").also { f -> stream.use { input -> f.outputStream().use { input.copyTo(it) } } }
+        } ?: return setError("La imagen se editó, pero no se pudo descargar. Intenta de nuevo.")
+        val guide = body.assistant_message
+        val guideMsg = guide?.let { ChatMessage(role = "assistant", content = it) }
+        val remaining = body.remaining ?: 0
+        _state.value = _state.value.copy(
+            items = _state.value.items +
+                ChatItem.AssistantImage(url = android.net.Uri.fromFile(file).toString(), promptUsed = instruction, edited = true) +
+                listOfNotNull(guideMsg?.let { ChatItem.Text(it) }),
+            messages = _state.value.messages + ChatMessage(role = "assistant", content = "[Imagen editada] ${guide.orEmpty()}".trim()),
+            conversationId = body.conversation_id ?: _state.value.conversationId,
+            refining = if (remaining > 0) RefineTarget(body.id, remaining) else null,
+            status = ChatStatus.Ready,
+        )
+    }
+
+    /** «Listo» o ✕ en el chip: el próximo mensaje vuelve a ser conversación normal. */
+    fun stopRefining() {
+        _state.value = _state.value.copy(refining = null)
     }
 
     fun stageImage(uri: Uri) {

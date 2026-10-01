@@ -212,6 +212,11 @@ fun ChatScreen(
             state.staged?.let { staged ->
                 StagedChip(staged = staged, onClear = viewModel::clearStaged)
             }
+            if (state.staged == null) {
+                state.refining?.let { target ->
+                    RefineChip(remaining = target.remaining, onDone = viewModel::stopRefining)
+                }
+            }
             if (state.attachingDocument) {
                 Text(
                     text = "// extracting document text…",
@@ -1018,6 +1023,64 @@ private fun StagedChip(staged: StagedAttachment, onClear: () -> Unit) {
                 Icon(
                     Icons.Default.Close,
                     contentDescription = "quitar",
+                    tint = CF_Dim,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+        }
+    }
+}
+
+// ─── Chip de ajustes guiados (sobre el input) ────────────────────
+@Composable
+private fun RefineChip(remaining: Int, onDone: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(CF_Green.copy(alpha = 0.10f))
+                .border(1.dp, CF_Green.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        ) {
+            Icon(
+                Icons.Default.AutoFixHigh,
+                contentDescription = null,
+                tint = CF_Green,
+                modifier = Modifier.size(16.dp),
+            )
+            Text(
+                if (remaining == 1) "ajustando imagen · queda 1" else "ajustando imagen · quedan $remaining",
+                color = CF_Green,
+                fontFamily = mono,
+                fontSize = 11.sp,
+            )
+            Text(
+                "listo",
+                color = CF_Cyan,
+                fontFamily = mono,
+                fontSize = 11.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onDone)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+            )
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onDone),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "dejar de ajustar",
                     tint = CF_Dim,
                     modifier = Modifier.size(14.dp),
                 )

@@ -49,6 +49,24 @@ object ImageEditSupport {
         }
     }
 
+    /** Códigos tras los cuales ya no tiene sentido seguir ajustando esa imagen. */
+    val REFINE_TERMINAL_CODES = setOf("edit_limit_reached", "already_refined", "image_expired", "not_refinable")
+
+    // Solo cuando todo el mensaje es el cierre: «ok, ahora hazlo azul» sigue siendo un ajuste.
+    private val CLOSE_PHRASE = "(listo|gracias|muchas gracias|perfecto|genial|excelente|ok|okay|vale|me gusta|me encanta|" +
+        "ya esta|asi esta|asi esta bien|asi quedo|asi quedo bien|dejalo asi|asi dejalo|esta bien|quedo bien|quedo perfecto|quedo genial|" +
+        "ya quedo|no gracias|no, gracias|no, asi esta bien|no, ya esta)"
+    private val CLOSE_REFINE = Regex("^$CLOSE_PHRASE([ ,]+($CLOSE_PHRASE|cirilo))*$")
+
+    /** «Quedó bien», «gracias», «listo»…: el usuario cierra los ajustes en lugar de pedir otro. */
+    fun closesRefine(text: String): Boolean {
+        val normalized = java.text.Normalizer.normalize(text.trim().lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+            .replace(Regex("[¡!¿?.\\s]+$|^[¡!¿?.\\s]+"), "")
+            .replace(Regex("\\s+"), " ")
+        return CLOSE_REFINE.matches(normalized)
+    }
+
     /** Mensaje para el usuario según el código de error del servidor. */
     fun errorMessage(httpCode: Int, code: String?, message: String?): String = when (code) {
         "content_rejected" -> "No puedo hacer esa edición con esa imagen o instrucción. Prueba con otra."
@@ -56,6 +74,9 @@ object ImageEditSupport {
         "provider_timeout" -> "La edición tardó demasiado. No se reintentó para no cobrarla dos veces."
         "image_edit_disabled" -> "La edición de imágenes aún no está disponible."
         "idempotency_conflict", "in_progress" -> "Esa edición ya se está procesando."
+        "edit_limit_reached" -> "Esa imagen ya tuvo todos sus ajustes. Adjunta una foto para empezar otra edición."
+        "already_refined" -> "Esa imagen ya se ajustó; sigue desde la más reciente."
+        "image_expired" -> "Esa imagen ya venció. Adjunta la foto de nuevo para editarla."
         else -> message ?: "No se pudo editar la imagen ($httpCode)."
     }
 }

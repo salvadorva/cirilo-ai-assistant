@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.salvadorva.asistente.network.models.ImageEditResponse
 import com.salvadorva.asistente.util.ImageEditSupport
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -24,5 +25,19 @@ class ImageEditSupportTest {
         assertTrue(ImageEditSupport.errorMessage(504, "provider_timeout", null).contains("no se reintentó", ignoreCase = true))
         assertEquals("Alcanzaste el límite de imágenes.", ImageEditSupport.errorMessage(429, "image_quota_exceeded", "Alcanzaste el límite de imágenes."))
         assertEquals("No se pudo editar la imagen (500).", ImageEditSupport.errorMessage(500, null, null))
+    }
+
+    @Test
+    fun closingPhrasesEndRefiningButAdjustmentsDoNot() {
+        listOf("Quedó bien", "¡Gracias!", "listo", "Así está bien, gracias", "ok", "Perfecto, Cirilo", "no, gracias", "Déjalo así.")
+            .forEach { assertTrue(it, ImageEditSupport.closesRefine(it)) }
+        listOf("ok, ahora hazlo azul", "gracias, pero cambia el fondo", "que quede bien el sombrero", "más grande", "listo para ponerle un loro")
+            .forEach { assertFalse(it, ImageEditSupport.closesRefine(it)) }
+    }
+
+    @Test
+    fun refineErrorsHaveFriendlyMessages() {
+        assertTrue(ImageEditSupport.errorMessage(422, "edit_limit_reached", null).contains("todos sus ajustes"))
+        assertTrue("image_expired" in ImageEditSupport.REFINE_TERMINAL_CODES)
     }
 }

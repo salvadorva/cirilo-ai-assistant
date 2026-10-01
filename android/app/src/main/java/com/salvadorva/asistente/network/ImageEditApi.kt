@@ -1,10 +1,12 @@
 package com.salvadorva.asistente.network
 
 import com.salvadorva.asistente.network.models.ImageEditResponse
+import com.salvadorva.asistente.network.models.ImageRefineRequest
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import okhttp3.ResponseBody
 import retrofit2.Response
+import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.Multipart
@@ -22,6 +24,14 @@ interface ImageEditApi {
         @Part image: MultipartBody.Part,
         @Part("instruction") instruction: RequestBody,
         @Part("conversation_id") conversationId: RequestBody?,
+    ): Response<ImageEditResponse>
+
+    /** Ajusta el último resultado de la cadena sin volver a subir la foto (máx. 2 ajustes). */
+    @POST("api/mobile/images/edits/{id}/refine")
+    suspend fun refine(
+        @Header("Idempotency-Key") idempotencyKey: String,
+        @Path("id") id: String,
+        @Body body: ImageRefineRequest,
     ): Response<ImageEditResponse>
 
     /** Resultado privado (solo su dueño, 7 días). */
