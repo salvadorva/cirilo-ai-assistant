@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\ImageQuotaService;
 use Carbon\Carbon;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
@@ -90,6 +91,7 @@ class ImageEditTest extends SecurityTestCase
         $response = $this->edit()->assertCreated();
 
         $id = $response->json('id');
+        $response->assertJsonPath('round', 1)->assertJsonPath('remaining', 2);
         $this->assertSame('/api/mobile/images/edits/'.$id, $response->json('url'));
         $this->assertSame('2026-10-07', Carbon::parse($response->json('expires_at'))->setTimezone('America/Guatemala')->toDateString());
         Http::assertSent(function (HttpRequest $request) {
@@ -111,7 +113,7 @@ class ImageEditTest extends SecurityTestCase
         $this->assertSame(['success', 'gpt-image-1'], [$usage->status, $usage->model]);
         $this->assertGreaterThan(0, (float) $usage->estimated_cost, 'El costo sale del usage de la respuesta multipart.');
         // En la conversación solo queda texto.
-        $this->assertSame(['[Editar imagen] Ponle un sombrero de pirata al perro', '[Imagen editada: disponible 7 días en la app]'],
+        $this->assertSame(['[Editar imagen] Ponle un sombrero de pirata al perro', '[Imagen editada: disponible 7 días en la app] ¿Quedó como querías o cambio algo? Puedo hacerte 2 ajustes más.'],
             Message::where('conversation_id', $response->json('conversation_id'))->orderBy('id')->pluck('content')->all());
     }
 
@@ -184,5 +186,85 @@ class ImageEditTest extends SecurityTestCase
         $this->assertCount(0, Storage::disk('image_edits')->allFiles());
         $this->assertSame('expired', ImageEdit::sole()->status);
         $this->fetchResult($url)->assertStatus(410);
+    }
+
+    private function refine(string $id, string $instruction, string $key, ?User $user = null)
+    {
+        $response = $this->flushHeaders()->withHeaders(['Authorization' => 'Bearer '.($user ?? $this->owner)->createToken('android')->plainTextToken,
+            'Accept' => 'application/json', 'Idempotency-Key' => $key])->postJson("/api/mobile/images/edits/{$id}/refine", ['instruction' => $instruction]);
+        $this->app['auth']->forgetGuards();
+
+        return $response;
+    }
+
+    public function test_cirilo_guides_two_refinements_on_the_latest_result_and_then_stops(): void
+    {
+        config(['ai_security.requests_per_minute.image' => 20]);
+        $this->fakeProvider();
+        $first = $this->edit()->assertCreated();
+
+        $second = $this->refine($first->json('id'), 'Que el sombrero sea rojo', 'r-1')->assertCreated()
+            ->assertJsonPath('round', 2)->assertJsonPath('remaining', 1)
+            ->assertJsonPath('assistant_message', '¿Así está bien o cambio algo más? Me queda 1 ajuste.')
+            ->assertJsonPath('conversation_id', $first->json('conversation_id'));
+        $third = $this->refine($second->json('id'), 'Agrega un loro', 'r-2')->assertCreated()
+            ->assertJsonPath('round', 3)->assertJsonPath('remaining', 0)
+            ->assertJsonPath('assistant_message', 'Esta es la última modificación que pude trabajarte.');
+
+        $this->refine($third->json('id'), 'Otra más', 'r-3')->assertStatus(422)->assertJsonPath('code', 'edit_limit_reached');
+        // Ajustar una imagen ya ajustada abriría otra rama y saltaría el límite.
+        $this->refine($first->json('id'), 'Desde la primera', 'r-4')->assertStatus(409)->assertJsonPath('code', 'already_refined');
+
+        Http::assertSentCount(3);
+        Http::assertSent(fn (HttpRequest $request) => str_contains((string) collect($request->data())->firstWhere('name', 'prompt')['contents'],
+            'Mantén la imagen igual y cambia solo lo siguiente: Agrega un loro'));
+        $this->assertSame(3, app(ImageQuotaService::class)->used($this->owner), 'Cada ajuste cuenta en la cuota.');
+        $this->assertSame([
+            '[Editar imagen] Ponle un sombrero de pirata al perro',
+            '[Imagen editada: disponible 7 días en la app] ¿Quedó como querías o cambio algo? Puedo hacerte 2 ajustes más.',
+            '[Ajustar imagen] Que el sombrero sea rojo',
+            '[Imagen ajustada: disponible 7 días en la app] ¿Así está bien o cambio algo más? Me queda 1 ajuste.',
+            '[Ajustar imagen] Agrega un loro',
+            '[Imagen ajustada: disponible 7 días en la app] Esta es la última modificación que pude trabajarte.',
+        ], Message::where('conversation_id', $first->json('conversation_id'))->orderBy('id')->pluck('content')->all());
+    }
+
+    public function test_a_refinement_retry_is_idempotent_and_others_cannot_refine_my_image(): void
+    {
+        $this->fakeProvider();
+        $first = $this->edit()->assertCreated();
+
+        $a = $this->refine($first->json('id'), 'Que el sombrero sea rojo', 'r-1')->assertCreated();
+        $b = $this->refine($first->json('id'), 'Que el sombrero sea rojo', 'r-1')->assertOk();
+        $this->assertSame($a->json('id'), $b->json('id'));
+        $this->refine($first->json('id'), 'Otra cosa', 'r-1')->assertStatus(409)->assertJsonPath('code', 'idempotency_conflict');
+
+        $this->refine($a->json('id'), 'Hackear', 'x-1', $this->user())->assertNotFound();
+        Http::assertSentCount(2);
+    }
+
+    public function test_a_failed_refinement_can_be_retried_and_an_expired_image_cannot_be_refined(): void
+    {
+        $this->fakeProvider();
+        $first = $this->edit()->assertCreated();
+        Http::swap(new Factory);
+        Http::fake(['api.openai.com/v1/images/edits' => Http::response(['error' => ['code' => 'moderation_blocked', 'message' => 'safety']], 400)]);
+
+        $this->refine($first->json('id'), 'Algo no permitido', 'r-1')->assertStatus(422)->assertJsonPath('code', 'content_rejected');
+        Http::swap(new Factory);
+        $this->fakeProvider();
+        $this->refine($first->json('id'), 'Que el sombrero sea rojo', 'r-2')->assertCreated()->assertJsonPath('round', 2);
+
+        Carbon::setTestNow(now()->addDays(8));
+        $this->refine($first->json('id'), 'Tarde', 'r-3')->assertStatus(410)->assertJsonPath('code', 'image_expired');
+    }
+
+    public function test_refining_is_off_with_the_feature_flag(): void
+    {
+        $this->fakeProvider();
+        $first = $this->edit()->assertCreated();
+        config(['ai.image_edit.enabled' => false]);
+
+        $this->refine($first->json('id'), 'Que el sombrero sea rojo', 'r-1')->assertStatus(503);
     }
 }

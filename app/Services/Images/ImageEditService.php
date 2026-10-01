@@ -25,6 +25,8 @@ use Illuminate\Support\Facades\Storage;
  *   nunca se guarda. El resultado queda en disco privado 7 días y solo lo ve su dueño.
  * - Cuota: la misma de generación (ImageQuotaService). Un rechazo no cuenta; un timeout sí
  *   (incierto: el proveedor pudo cobrar) y no se reintenta.
+ * - Ajustes: cada resultado puede ajustarse sobre sí mismo hasta completar max_rounds imágenes
+ *   por cadena (inicial + 2); Cirilo guía con un texto fijo cuántos ajustes quedan.
  */
 class ImageEditService
 {
@@ -37,8 +39,8 @@ class ImageEditService
         $hash = hash('sha256', hash_file('sha256', $image->getRealPath()).'|'.trim($instruction));
 
         try {
-            $edit = ImageEdit::create(['user_id' => $user->id, 'conversation_id' => $conversationId, 'idempotency_key' => $key,
-                'request_hash' => $hash, 'status' => 'pending']);
+            $edit = ImageEdit::create(['user_id' => $user->id, 'conversation_id' => $conversationId, 'round' => 1,
+                'idempotency_key' => $key, 'request_hash' => $hash, 'status' => 'pending']);
         } catch (QueryException) {
             return $this->replay(ImageEdit::where(['user_id' => $user->id, 'idempotency_key' => $key])->firstOrFail(), $hash);
         }
@@ -48,8 +50,66 @@ class ImageEditService
             return $this->fail($edit, 'failed', 'invalid_image', 422, 'No pude leer esa imagen. Prueba con otra foto.');
         }
 
+        return $this->withQuota($edit, $user, fn () => $this->callProvider($edit, $user, $png, trim($instruction), '[Editar imagen] '.trim($instruction)));
+    }
+
+    /** Ajusta el último resultado de una cadena (sin volver a subir la foto). */
+    public function refine(User $user, string $parentId, string $instruction, string $key): JsonResponse
+    {
+        $hash = hash('sha256', 'refine|'.$parentId.'|'.trim($instruction));
+        if ($existing = ImageEdit::where(['user_id' => $user->id, 'idempotency_key' => $key])->first()) {
+            return $this->replay($existing, $hash);
+        }
+
+        $parent = ImageEdit::where('user_id', $user->id)->findOrFail($parentId);
+        $disk = Storage::disk(self::DISK);
+        if ($parent->status === 'expired' || ($parent->expires_at && $parent->expires_at->isPast())) {
+            return response()->json(['code' => 'image_expired', 'message' => 'Esa imagen ya venció. Adjunta la foto de nuevo para editarla.'], 410);
+        }
+        if ($parent->status !== 'completed' || ! $parent->path || ! $disk->exists($parent->path)) {
+            return response()->json(['code' => 'not_refinable', 'message' => 'Esa imagen no se puede ajustar.'], 409);
+        }
+        if ($parent->round >= $this->maxRounds()) {
+            return response()->json(['code' => 'edit_limit_reached', 'message' => 'Esa imagen ya tuvo todos sus ajustes. Adjunta una foto para empezar otra edición.'], 422);
+        }
+        if (ImageEdit::where('parent_id', $parent->id)->whereIn('status', ['pending', 'completed'])->exists()) {
+            return response()->json(['code' => 'already_refined', 'message' => 'Esa imagen ya se ajustó; sigue desde la más reciente.'], 409);
+        }
+
         try {
-            return $this->quota->generate($user, fn () => $this->callProvider($edit, $user, $png, $instruction));
+            $edit = ImageEdit::create(['user_id' => $user->id, 'conversation_id' => $parent->conversation_id, 'parent_id' => $parent->id,
+                'round' => $parent->round + 1, 'idempotency_key' => $key, 'request_hash' => $hash, 'status' => 'pending']);
+        } catch (QueryException) {
+            return $this->replay(ImageEdit::where(['user_id' => $user->id, 'idempotency_key' => $key])->firstOrFail(), $hash);
+        }
+
+        $prompt = 'Mantén la imagen igual y cambia solo lo siguiente: '.trim($instruction);
+
+        return $this->withQuota($edit, $user, fn () => $this->callProvider($edit, $user, (string) $disk->get($parent->path), $prompt, '[Ajustar imagen] '.trim($instruction)));
+    }
+
+    /** Texto fijo con el que Cirilo entrega cada imagen y dice cuántos ajustes quedan. */
+    public function guide(int $round): string
+    {
+        $remaining = max(0, $this->maxRounds() - $round);
+
+        return match (true) {
+            $remaining === 0 => 'Esta es la última modificación que pude trabajarte.',
+            $remaining === 1 => '¿Así está bien o cambio algo más? Me queda 1 ajuste.',
+            $round === 1 => "¿Quedó como querías o cambio algo? Puedo hacerte {$remaining} ajustes más.",
+            default => "¿Así está bien o cambio algo más? Me quedan {$remaining} ajustes.",
+        };
+    }
+
+    private function maxRounds(): int
+    {
+        return max(1, (int) config('ai.image_edit.max_rounds', 3));
+    }
+
+    private function withQuota(ImageEdit $edit, User $user, \Closure $call): JsonResponse
+    {
+        try {
+            return $this->quota->generate($user, $call);
         } catch (HttpResponseException $e) {
             // Límite diario o por minuto: no se envió nada al proveedor.
             $edit->update(['status' => 'failed', 'error_code' => 'image_quota_exceeded']);
@@ -89,7 +149,7 @@ class ImageEditService
         return $count;
     }
 
-    private function callProvider(ImageEdit $edit, User $user, string $png, string $instruction): JsonResponse
+    private function callProvider(ImageEdit $edit, User $user, string $png, string $prompt, string $userText): JsonResponse
     {
         $config = config('ai.image_edit');
         try {
@@ -98,7 +158,7 @@ class ImageEditService
                 ->attach('image', $png, 'imagen.png', ['Content-Type' => 'image/png'])
                 ->post('https://api.openai.com/v1/images/edits', [
                     'model' => $config['model'],
-                    'prompt' => trim($instruction),
+                    'prompt' => $prompt,
                     'n' => 1,
                     'quality' => $config['quality'],
                     'size' => $config['size'],
@@ -114,7 +174,7 @@ class ImageEditService
             Storage::disk(self::DISK)->put($path, base64_decode($b64));
             $this->shareWithGroup($path);
             $edit->update(['status' => 'completed', 'path' => $path, 'expires_at' => now()->addDays((int) $config['retention_days'])]);
-            $conversation = $this->persistConversation($edit, $user, $instruction);
+            $conversation = $this->persistConversation($edit, $user, $userText);
 
             return response()->json($this->describe($edit) + ['conversation_id' => $conversation->id, 'image_url' => $this->url($edit)], 201);
         }
@@ -186,13 +246,14 @@ class ImageEditService
         return (string) ob_get_clean();
     }
 
-    private function persistConversation(ImageEdit $edit, User $user, string $instruction): Conversation
+    private function persistConversation(ImageEdit $edit, User $user, string $userText): Conversation
     {
         $conversation = $edit->conversation_id ? Conversation::where('user_id', $user->id)->find($edit->conversation_id) : null;
-        $conversation ??= Conversation::create(['user_id' => $user->id, 'title' => mb_substr('Editar imagen: '.$instruction, 0, 60),
+        $conversation ??= Conversation::create(['user_id' => $user->id, 'title' => mb_substr(str_replace('[Editar imagen] ', 'Editar imagen: ', $userText), 0, 60),
             'type' => 'chat', 'content' => json_encode(['messages' => []])]);
-        Message::create(['conversation_id' => $conversation->id, 'role' => 'user', 'content' => '[Editar imagen] '.trim($instruction)]);
-        Message::create(['conversation_id' => $conversation->id, 'role' => 'assistant', 'content' => '[Imagen editada: disponible 7 días en la app]']);
+        $label = $edit->parent_id ? '[Imagen ajustada: disponible 7 días en la app] ' : '[Imagen editada: disponible 7 días en la app] ';
+        Message::create(['conversation_id' => $conversation->id, 'role' => 'user', 'content' => $userText]);
+        Message::create(['conversation_id' => $conversation->id, 'role' => 'assistant', 'content' => $label.$this->guide($edit->round)]);
         ConversationHistory::refreshContent($conversation);
         $edit->update(['conversation_id' => $conversation->id]);
 
@@ -201,7 +262,8 @@ class ImageEditService
 
     private function describe(ImageEdit $edit): array
     {
-        return ['id' => $edit->id, 'url' => $this->url($edit), 'expires_at' => $edit->expires_at?->toIso8601String()];
+        return ['id' => $edit->id, 'url' => $this->url($edit), 'expires_at' => $edit->expires_at?->toIso8601String(),
+            'round' => $edit->round, 'remaining' => max(0, $this->maxRounds() - $edit->round), 'assistant_message' => $this->guide($edit->round)];
     }
 
     private function url(ImageEdit $edit): string

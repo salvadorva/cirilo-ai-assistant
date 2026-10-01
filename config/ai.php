@@ -66,5 +66,7 @@ return [
         'timeout_seconds' => 120,
         'max_side' => 2048,
         'retention_days' => 7,
+        // Imágenes por cadena: la edición inicial más dos ajustes guiados por Cirilo.
+        'max_rounds' => 3,
     ],
 ];

@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\CalendarEvent;
 use App\Models\Conversation;
+use App\Services\InteractionTracker;
 use App\Support\ChatInput;
 use Closure;
 use Illuminate\Auth\AuthenticationException;
@@ -28,7 +29,7 @@ class GuardAiRequests
             throw new AuthenticationException;
         }
 
-        return app(\App\Services\InteractionTracker::class)->run($request, fn () => $this->guard($request, $next, $profile, $class, $method));
+        return app(InteractionTracker::class)->run($request, fn () => $this->guard($request, $next, $profile, $class, $method));
     }
 
     private function guard(Request $request, Closure $next, string $profile, string $class, string $method): Response
@@ -104,7 +105,7 @@ class GuardAiRequests
             return 'chat';
         }
         if ($class === 'MobileImageEditController') {
-            return $method === 'edit' ? 'image' : 'resource';
+            return in_array($method, ['edit', 'refine']) ? 'image' : 'resource';
         }
         if (in_array($class, ['MobileImageController', 'ImageAnalysisController'])) {
             return str_starts_with($method, 'save') ? 'conversation' : 'image';

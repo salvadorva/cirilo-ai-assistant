@@ -1,7 +1,7 @@
 <?php
 
-use App\Http\Controllers\Api\MobileAgendaController;
 use App\Http\Controllers\Api\Integrations\HermesReminderController;
+use App\Http\Controllers\Api\MobileAgendaController;
 use App\Http\Controllers\Api\MobileAuthController;
 use App\Http\Controllers\Api\MobileChatController;
 use App\Http\Controllers\Api\MobileContextualReminderController;
@@ -9,7 +9,11 @@ use App\Http\Controllers\Api\MobileConversationController;
 use App\Http\Controllers\Api\MobileDeviceController;
 use App\Http\Controllers\Api\MobileFocusSlotController;
 use App\Http\Controllers\Api\MobileImageController;
+use App\Http\Controllers\Api\MobileImageEditController;
 use App\Http\Controllers\Api\MobileMemoryController;
+use App\Http\Controllers\Api\MobileTodayController;
+use App\Http\Controllers\InteractionFeedbackController;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -28,7 +32,7 @@ Route::prefix('mobile')->middleware('throttle:60,1')->group(function () {
     Route::post('/login', [MobileAuthController::class, 'login']);
 
     Route::middleware('auth:sanctum')->group(function () {
-        Route::post('/interactions/{id}/feedback', [\App\Http\Controllers\InteractionFeedbackController::class, 'store'])->whereUuid('id');
+        Route::post('/interactions/{id}/feedback', [InteractionFeedbackController::class, 'store'])->whereUuid('id');
         // Auth
         Route::get('/me', [MobileAuthController::class, 'me']);
         Route::post('/logout', [MobileAuthController::class, 'logout']);
@@ -36,12 +40,12 @@ Route::prefix('mobile')->middleware('throttle:60,1')->group(function () {
         // Chat — sesión efímera para que AIController::generateText pueda
         // llamar session() sin romper (cliente móvil es stateless).
         Route::post('/chat', [MobileChatController::class, 'chat'])
-            ->middleware([\Illuminate\Session\Middleware\StartSession::class]);
+            ->middleware([StartSession::class]);
 
         // Chat con imagen adjunta — usa GPT-4o Vision y persiste en conversación
         // para que el contexto quede en memoria como texto.
         Route::post('/chat/image', [MobileChatController::class, 'chatWithImage'])
-            ->middleware([\Illuminate\Session\Middleware\StartSession::class]);
+            ->middleware([StartSession::class]);
 
         // Conversaciones
         Route::get('/conversations', [MobileConversationController::class, 'index']);
@@ -54,8 +58,9 @@ Route::prefix('mobile')->middleware('throttle:60,1')->group(function () {
             ->middleware('image.limit');
         Route::post('/images/analyze', [MobileImageController::class, 'analyze']);
         // IE1: editar imagen (apagado con IMAGE_EDIT_ENABLED=false)
-        Route::post('/images/edit', [\App\Http\Controllers\Api\MobileImageEditController::class, 'edit']);
-        Route::get('/images/edits/{id}', [\App\Http\Controllers\Api\MobileImageEditController::class, 'show'])->whereUuid('id');
+        Route::post('/images/edit', [MobileImageEditController::class, 'edit']);
+        Route::get('/images/edits/{id}', [MobileImageEditController::class, 'show'])->whereUuid('id');
+        Route::post('/images/edits/{id}/refine', [MobileImageEditController::class, 'refine'])->whereUuid('id');
 
         // Agenda
         Route::get('/agenda/events', [MobileAgendaController::class, 'index']);
@@ -74,11 +79,11 @@ Route::prefix('mobile')->middleware('throttle:60,1')->group(function () {
 
         // Memoria del usuario (user_profile_facts)
         // F6: Hoy y pendientes
-        Route::get('/today', [\App\Http\Controllers\Api\MobileTodayController::class, 'today']);
-        Route::put('/today/preferences', [\App\Http\Controllers\Api\MobileTodayController::class, 'preferences']);
-        Route::get('/tasks', [\App\Http\Controllers\Api\MobileTodayController::class, 'index']);
-        Route::post('/tasks', [\App\Http\Controllers\Api\MobileTodayController::class, 'store']);
-        Route::patch('/tasks/{id}', [\App\Http\Controllers\Api\MobileTodayController::class, 'update'])->whereNumber('id');
+        Route::get('/today', [MobileTodayController::class, 'today']);
+        Route::put('/today/preferences', [MobileTodayController::class, 'preferences']);
+        Route::get('/tasks', [MobileTodayController::class, 'index']);
+        Route::post('/tasks', [MobileTodayController::class, 'store']);
+        Route::patch('/tasks/{id}', [MobileTodayController::class, 'update'])->whereNumber('id');
         Route::get('/memory', [MobileMemoryController::class, 'index']);
         Route::delete('/memory/{id}', [MobileMemoryController::class, 'destroy']);
         Route::patch('/memory/{id}', [MobileMemoryController::class, 'update'])->whereNumber('id');

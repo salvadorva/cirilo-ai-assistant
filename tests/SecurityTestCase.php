@@ -54,6 +54,7 @@ abstract class SecurityTestCase extends TestCase
             '2026_09_29_120000_create_event_notification_deliveries_table.php',
             '2026_09_30_100000_create_tasks_and_daily_summary.php',
             '2026_09_30_110000_create_image_edits_table.php',
+            '2026_10_01_120000_add_refine_chain_to_image_edits.php',
         ];
         $this->artisan('migrate', ['--path' => array_map(fn ($file) => 'database/migrations/'.$file, $migrations), '--force' => true])
             ->assertExitCode(0);

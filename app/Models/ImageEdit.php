@@ -10,7 +10,7 @@ class ImageEdit extends Model
 {
     use HasUuids;
 
-    protected $fillable = ['user_id', 'conversation_id', 'idempotency_key', 'request_hash', 'status', 'path', 'error_code', 'expires_at'];
+    protected $fillable = ['user_id', 'conversation_id', 'parent_id', 'round', 'idempotency_key', 'request_hash', 'status', 'path', 'error_code', 'expires_at'];
 
-    protected $casts = ['expires_at' => 'datetime'];
+    protected $casts = ['expires_at' => 'datetime', 'round' => 'integer'];
 }
