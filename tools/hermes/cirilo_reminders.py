@@ -8,8 +8,8 @@ no depende de esta terminal.
 
 Configuración (nunca por argumentos de línea de comandos):
   CIRILO_HERMES_BASE_URL          https://<host>  (HTTPS obligatorio; http solo para localhost)
-  CIRILO_HERMES_REMINDERS_TOKEN   credencial exclusiva; si no está en el entorno se lee
-                                  de ~/.secrets (formato KEY=VALUE, permisos 0600)
+  CIRILO_HERMES_REMINDERS_TOKEN   credencial exclusiva
+  Ambas se toman del entorno o, si no están, de ~/.secrets (formato KEY=VALUE, permisos 0600).
   CIRILO_HERMES_STATE_DIR         opcional; por defecto ~/.local/state/cirilo-hermes
 
 Códigos de salida: 0 éxito confirmado · 2 uso/configuración · 3 rechazo del
@@ -31,8 +31,11 @@ import urllib.request
 from pathlib import Path
 
 TOKEN_VAR = "CIRILO_HERMES_REMINDERS_TOKEN"
+URL_VAR = "CIRILO_HERMES_BASE_URL"
 API_PATH = "/api/integrations/hermes/v1/reminders"
 TIMEOUT_SECONDS = 15
+# Cloudflare bloquea el User-Agent por defecto de urllib (error 1010) antes de llegar a Cirilo.
+USER_AGENT = "cirilo-hermes-reminders/1.0"
 EXIT_OK, EXIT_USAGE, EXIT_REJECTED, EXIT_SERVER, EXIT_UNCERTAIN = 0, 2, 3, 4, 75
 
 
@@ -46,16 +49,16 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """Nunca seguir redirecciones: la credencial no debe viajar a otro destino."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise ClientError(f"Redirección {code} rechazada; revisa CIRILO_HERMES_BASE_URL.", EXIT_REJECTED)
+        raise ClientError(f"Redirección {code} rechazada; revisa {URL_VAR}.", EXIT_REJECTED)
 
 
-def load_token(environ=os.environ, home: Path | None = None) -> str:
-    token = environ.get(TOKEN_VAR)
-    if token:
-        return token.strip()
+def _from_secrets(var: str, home: Path | None, required: bool) -> str | None:
+    """Lee VAR=valor de ~/.secrets (0600). Así Hermes no depende de variables de entorno."""
     path = (home or Path.home()) / ".secrets"
     if not path.is_file():
-        raise ClientError(f"Falta {TOKEN_VAR} (entorno o ~/.secrets).")
+        if required:
+            raise ClientError(f"Falta {var} (entorno o ~/.secrets).")
+        return None
     mode = stat.S_IMODE(path.stat().st_mode)
     if mode & (stat.S_IRWXG | stat.S_IRWXO):
         raise ClientError("~/.secrets debe tener permisos 0600; no se leyó.")
@@ -64,19 +67,30 @@ def load_token(environ=os.environ, home: Path | None = None) -> str:
         if line.startswith("export "):
             line = line[len("export "):]
         key, sep, value = line.partition("=")
-        if sep and key.strip() == TOKEN_VAR:
+        if sep and key.strip() == var:
             return value.strip().strip("'\"")
-    raise ClientError(f"{TOKEN_VAR} no está definido en ~/.secrets.")
+    if required:
+        raise ClientError(f"{var} no está definido en ~/.secrets.")
+    return None
 
 
-def base_url(environ=os.environ) -> str:
-    url = environ.get("CIRILO_HERMES_BASE_URL", "").rstrip("/")
+def load_token(environ=os.environ, home: Path | None = None) -> str:
+    token = environ.get(TOKEN_VAR)
+    if token:
+        return token.strip()
+    return _from_secrets(TOKEN_VAR, home, required=True)
+
+
+def base_url(environ=os.environ, home: Path | None = None) -> str:
+    url = (environ.get(URL_VAR) or _from_secrets(URL_VAR, home, required=False) or "").rstrip("/")
+    if not url:
+        raise ClientError(f"Falta {URL_VAR} (entorno o ~/.secrets).")
     parsed = urllib.parse.urlparse(url)
     local = parsed.hostname in ("localhost", "127.0.0.1")
     if parsed.scheme != "https" and not (parsed.scheme == "http" and local):
-        raise ClientError("CIRILO_HERMES_BASE_URL debe ser HTTPS (http solo para localhost).")
+        raise ClientError(f"{URL_VAR} debe ser HTTPS (http solo para localhost).")
     if parsed.query or parsed.fragment or parsed.username or parsed.password:
-        raise ClientError("CIRILO_HERMES_BASE_URL no admite credenciales, query ni fragmento.")
+        raise ClientError(f"{URL_VAR} no admite credenciales, query ni fragmento.")
     return url
 
 
@@ -113,6 +127,7 @@ class Client:
         request = urllib.request.Request(self.url + path, data=data, method=method)
         request.add_header("Authorization", "Bearer " + self._token)
         request.add_header("Accept", "application/json")
+        request.add_header("User-Agent", USER_AGENT)
         if data is not None:
             request.add_header("Content-Type", "application/json")
         if key:

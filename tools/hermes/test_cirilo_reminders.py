@@ -96,12 +96,20 @@ class ClientTest(unittest.TestCase):
         self.assertNotIn(FAKE_TOKEN, out + err)
         self.assertNotIn(FAKE_TOKEN, repr(cli.Client(self.url, FAKE_TOKEN, Path(self.tmp.name))))
         self.assertEqual("Bearer " + FAKE_TOKEN, Stub.requests[0]["headers"]["Authorization"])
+        self.assertEqual(cli.USER_AGENT, Stub.requests[0]["headers"]["User-Agent"], "Sin el UA por defecto de urllib que bloquea Cloudflare.")
 
     def test_https_is_required_except_localhost(self):
         for url in ("http://cirilo.example.com", "https://user:pw@cirilo.example.com", "https://cirilo.example.com/?x=1", ""):
             with self.assertRaises(cli.ClientError):
-                cli.base_url({"CIRILO_HERMES_BASE_URL": url})
+                cli.base_url({"CIRILO_HERMES_BASE_URL": url}, Path(self.tmp.name))
         self.assertEqual("https://cirilo.example.com", cli.base_url({"CIRILO_HERMES_BASE_URL": "https://cirilo.example.com/"}))
+
+    def test_base_url_can_live_in_the_secrets_file_next_to_the_token(self):
+        home = Path(self.tmp.name)
+        (home / ".secrets").write_text("export CIRILO_HERMES_BASE_URL=https://cirilo.example.com/\n", encoding="utf-8")
+        os.chmod(home / ".secrets", 0o600)
+        self.assertEqual("https://cirilo.example.com", cli.base_url({}, home))
+        self.assertEqual("https://otro.example.com", cli.base_url({"CIRILO_HERMES_BASE_URL": "https://otro.example.com"}, home), "El entorno manda.")
 
     # ---- alta y respuestas ----
 
