@@ -44,6 +44,7 @@ data class AgendaUiState(
     val loading: Boolean = false,
     val saving: Boolean = false,
     val events: List<AgendaEvent> = emptyList(),
+    val reminders: List<com.salvadorva.asistente.reminders.ReminderDetail> = emptyList(), // pendientes (Hermes)
     val error: String? = null,
     val editor: EventEditor? = null,    // sheet de crear/editar
     val detail: AgendaEvent? = null,    // sheet de detalle
@@ -66,10 +67,15 @@ class AgendaViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val res = api.list()
+                // Los recordatorios acordados con Hermes no son eventos: se piden aparte y, si
+                // fallan, la agenda se muestra igual.
+                val reminders = runCatching { ApiClient.contextualReminderApi.list() }.getOrNull()
+                    ?.takeIf { it.isSuccessful }?.body()?.data.orEmpty()
+                    .filter { it.isPending }
                 if (res.isSuccessful) {
                     val events = res.body()?.events.orEmpty()
                         .sortedBy { isoToDate(it.start_date)?.time ?: Long.MAX_VALUE }
-                    _state.value = _state.value.copy(loading = false, events = events)
+                    _state.value = _state.value.copy(loading = false, events = events, reminders = reminders)
                 } else {
                     _state.value = _state.value.copy(
                         loading = false,

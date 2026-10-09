@@ -35,6 +35,9 @@ import com.salvadorva.asistente.network.models.AgendaEvent
 import com.salvadorva.asistente.ui.theme.*
 import com.salvadorva.asistente.util.combineDateTime
 import com.salvadorva.asistente.util.dayKey
+import com.salvadorva.asistente.util.isoToDate
+import com.salvadorva.asistente.reminders.ReminderDetail
+import com.salvadorva.asistente.ui.reminders.ContextualReminderDialog
 import com.salvadorva.asistente.util.formatMillis
 import com.salvadorva.asistente.util.friendlyDayLabel
 import com.salvadorva.asistente.util.localDateToUtcMillis
@@ -58,6 +61,7 @@ fun AgendaScreen(
 ) {
     val state by viewModel.state.collectAsState()
     var mode by remember { mutableStateOf(AgendaMode.EVENTS) }
+    var openReminderId by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(deepLinkEventId) {
         deepLinkEventId?.let {
@@ -104,12 +108,14 @@ fun AgendaScreen(
                     }
 
                     when {
-                        state.loading && state.events.isEmpty() -> LoadingState()
-                        state.events.isEmpty() -> EmptyState(onNew = viewModel::openCreate)
+                        state.loading && state.events.isEmpty() && state.reminders.isEmpty() -> LoadingState()
+                        state.events.isEmpty() && state.reminders.isEmpty() -> EmptyState(onNew = viewModel::openCreate)
                         else -> EventList(
                             events = state.events,
+                            reminders = state.reminders,
                             highlightId = state.highlightEventId,
                             onClick = viewModel::openDetail,
+                            onReminderClick = { openReminderId = it.id },
                         )
                     }
                 }
@@ -117,6 +123,14 @@ fun AgendaScreen(
                 AgendaMode.FOCUS -> FocusSlotsContent(viewModel = focusViewModel)
             }
         }
+    }
+
+    openReminderId?.let { id ->
+        // Mismo detalle que al tocar la notificación: Hecho, Posponer, Cancelar y Escuchar.
+        ContextualReminderDialog(reminderId = id, openSnooze = false, onDismiss = {
+            openReminderId = null
+            viewModel.load()
+        })
     }
 
     state.detail?.let { event ->
@@ -153,71 +167,65 @@ private fun HeaderBar(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 14.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ModePill(
-                label = "eventos",
-                selected = mode == AgendaMode.EVENTS,
-                accent = CF_Cyan,
-                onClick = { onModeChange(AgendaMode.EVENTS) },
-            )
-            ModePill(
-                label = "enfoque",
-                selected = mode == AgendaMode.FOCUS,
-                accent = CF_Green,
-                onClick = { onModeChange(AgendaMode.FOCUS) },
-            )
-        }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(accent.copy(alpha = 0.10f))
-                .border(1.dp, accent.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                .clickable(onClick = onNew)
-                .padding(horizontal = 12.dp, vertical = 7.dp),
-        ) {
-            Icon(Icons.Default.Add, null, tint = accent, modifier = Modifier.size(16.dp))
-            Text(
-                if (mode == AgendaMode.EVENTS) "nuevo.evento" else "nuevo.slot",
-                color = accent,
-                fontFamily = mono,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
+        AgendaChip("eventos", CF_Cyan, selected = mode == AgendaMode.EVENTS, onClick = { onModeChange(AgendaMode.EVENTS) })
+        AgendaChip("enfoque", CF_Green, selected = mode == AgendaMode.FOCUS, onClick = { onModeChange(AgendaMode.FOCUS) })
+        Spacer(Modifier.weight(1f))
+        // La acción se distingue de las pestañas por ir rellena con el color de la sección.
+        AgendaChip("nuevo", accent, filled = true, icon = Icons.Default.Add, onClick = onNew)
     }
 }
 
+/**
+ * Botón único de la agenda: misma altura, tipografía y forma para pestañas y acciones. Una palabra
+ * por botón para que quepa en pantallas angostas.
+ */
 @Composable
-private fun ModePill(
+internal fun AgendaChip(
     label: String,
-    selected: Boolean,
     accent: Color,
+    selected: Boolean = false,
+    filled: Boolean = false,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     onClick: () -> Unit,
 ) {
-    Box(
+    val shape = RoundedCornerShape(10.dp)
+    val background = when {
+        filled -> accent
+        selected -> accent.copy(alpha = 0.14f)
+        else -> Color.Transparent
+    }
+    val border = when {
+        filled -> accent
+        selected -> accent.copy(alpha = 0.6f)
+        else -> CF_Dim.copy(alpha = 0.3f)
+    }
+    val content = when {
+        filled -> CF_Bg
+        selected -> accent
+        else -> CF_Dim
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (selected) accent.copy(alpha = 0.12f) else Color.Transparent)
-            .border(
-                1.dp,
-                if (selected) accent.copy(alpha = 0.55f) else CF_Dim.copy(alpha = 0.3f),
-                RoundedCornerShape(10.dp),
-            )
+            .height(34.dp)
+            .clip(shape)
+            .background(background)
+            .border(1.dp, border, shape)
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 7.dp),
+            .padding(horizontal = 12.dp),
     ) {
+        icon?.let { Icon(it, null, tint = content, modifier = Modifier.size(16.dp)) }
         Text(
-            "// $label",
-            color = if (selected) accent else CF_Dim,
+            label,
+            color = content,
             fontFamily = mono,
             fontSize = 12.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            letterSpacing = 1.sp,
+            fontWeight = if (filled || selected) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 1,
         )
     }
 }
@@ -245,7 +253,7 @@ private fun EmptyState(onNew: () -> Unit) {
     ) {
         Icon(Icons.Default.CalendarMonth, null, tint = CF_Dim, modifier = Modifier.size(48.dp))
         Spacer(Modifier.height(14.dp))
-        Text("> system: sin eventos próximos", color = CF_Text, fontFamily = mono, fontSize = 13.sp)
+        Text("> system: sin eventos ni recordatorios próximos", color = CF_Text, fontFamily = mono, fontSize = 13.sp)
         Spacer(Modifier.height(6.dp))
         Text(
             "// agendá algo o pedíselo a Cirilo por voz",
@@ -254,39 +262,37 @@ private fun EmptyState(onNew: () -> Unit) {
             fontSize = 11.sp,
         )
         Spacer(Modifier.height(18.dp))
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(CF_Cyan.copy(alpha = 0.10f))
-                .border(1.dp, CF_Cyan.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                .clickable(onClick = onNew)
-                .padding(horizontal = 14.dp, vertical = 9.dp),
-        ) {
-            Icon(Icons.Default.Add, null, tint = CF_Cyan, modifier = Modifier.size(16.dp))
-            Text("crear evento", color = CF_Cyan, fontFamily = mono, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        }
+        AgendaChip("nuevo", CF_Cyan, filled = true, icon = Icons.Default.Add, onClick = onNew)
     }
 }
 
 // ─── Lista agrupada por día ───────────────────────────────────────
+/** Un renglón de la agenda: evento del calendario o recordatorio acordado (Hermes). */
+private sealed class AgendaEntry(val iso: String?, val key: String) {
+    class Event(val event: AgendaEvent) : AgendaEntry(event.start_date, "e${event.id}")
+    class Reminder(val reminder: ReminderDetail) : AgendaEntry(reminder.scheduled_at, "r${reminder.id}")
+}
+
 @Composable
 private fun EventList(
     events: List<AgendaEvent>,
+    reminders: List<ReminderDetail>,
     highlightId: Int?,
     onClick: (AgendaEvent) -> Unit,
+    onReminderClick: (ReminderDetail) -> Unit,
 ) {
-    val grouped = events.groupBy { dayKey(it.start_date) }
+    val entries = (events.map { AgendaEntry.Event(it) } + reminders.map { AgendaEntry.Reminder(it) })
+        .sortedBy { isoToDate(it.iso)?.time ?: Long.MAX_VALUE }
+    val grouped = entries.groupBy { dayKey(it.iso) }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        grouped.forEach { (_, dayEvents) ->
+        grouped.forEach { (_, dayEntries) ->
             item {
                 Text(
-                    friendlyDayLabel(dayEvents.first().start_date),
+                    friendlyDayLabel(dayEntries.first().iso),
                     color = CF_Cyan,
                     fontFamily = mono,
                     fontSize = 11.sp,
@@ -295,12 +301,54 @@ private fun EventList(
                     modifier = Modifier.padding(top = 10.dp, bottom = 2.dp),
                 )
             }
-            items(dayEvents, key = { it.id }) { event ->
-                EventCard(
-                    event = event,
-                    highlighted = event.id == highlightId,
-                    onClick = { onClick(event) },
-                )
+            items(dayEntries, key = { it.key }) { entry ->
+                when (entry) {
+                    is AgendaEntry.Event -> EventCard(
+                        event = entry.event,
+                        highlighted = entry.event.id == highlightId,
+                        onClick = { onClick(entry.event) },
+                    )
+                    is AgendaEntry.Reminder -> ReminderCard(entry.reminder, onClick = { onReminderClick(entry.reminder) })
+                }
+            }
+        }
+    }
+}
+
+/** Recordatorio acordado: se distingue del evento por el color verde y la etiqueta. */
+@Composable
+private fun ReminderCard(reminder: ReminderDetail, onClick: () -> Unit) {
+    val accent = CF_Green
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(accent.copy(alpha = 0.06f))
+            .border(1.dp, accent.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(Icons.Default.NotificationsActive, null, tint = accent, modifier = Modifier.size(18.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                reminder.title ?: "Recordatorio",
+                color = CF_Text,
+                fontFamily = mono,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                listOfNotNull(reminder.scheduled_at?.let { formatMillisFromIso(it, "HH:mm") }, "recordatorio").joinToString(" · "),
+                color = accent.copy(alpha = 0.85f),
+                fontFamily = mono,
+                fontSize = 11.sp,
+            )
+            reminder.next_action?.takeIf { it.isNotBlank() }?.let {
+                Text(it, color = CF_Dim, fontFamily = mono, fontSize = 10.5.sp, maxLines = 1)
             }
         }
     }

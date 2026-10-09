@@ -114,19 +114,7 @@ private fun SlotsEmptyState(onNew: () -> Unit) {
             fontSize = 11.sp,
         )
         Spacer(Modifier.height(18.dp))
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(CF_Green.copy(alpha = 0.10f))
-                .border(1.dp, CF_Green.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                .clickable(onClick = onNew)
-                .padding(horizontal = 14.dp, vertical = 9.dp),
-        ) {
-            Icon(Icons.Default.Add, null, tint = CF_Green, modifier = Modifier.size(16.dp))
-            Text("crear slot", color = CF_Green, fontFamily = mono, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        }
+        AgendaChip("nuevo", CF_Green, filled = true, icon = Icons.Default.Add, onClick = onNew)
     }
 }
 
