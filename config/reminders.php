@@ -25,7 +25,9 @@ return [
     'routine_dispatch_enabled' => (bool) env('REMINDERS_ROUTINE_DISPATCH_ENABLED', false),
     // Instante de corte ISO 8601: el camino nuevo de rutinas solo toma ocurrencias posteriores.
     'routine_dispatch_cutover_at' => env('REMINDERS_ROUTINE_DISPATCH_CUTOVER_AT'),
-    // Piloto: un solo teléfono, elegido explícitamente por ID de device_tokens.
+    // Piloto por usuario: recibe en su instalación compatible más reciente (sobrevive a reinstalar).
+    'dispatch_user_allowlist' => array_values(array_filter(array_map('intval', explode(',', (string) env('REMINDERS_DISPATCH_USER_IDS', ''))))),
+    // Piloto por instalación: IDs de device_tokens elegidos uno a uno (se pierde al reinstalar).
     'dispatch_device_allowlist' => array_values(array_filter(array_map('intval', explode(',', (string) env('REMINDERS_DISPATCH_DEVICE_IDS', ''))))),
     'device_capability' => 'contextual_reminders_v1',
     // Capacidades que el backend reconoce al registrar una instalación (RC3).

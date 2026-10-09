@@ -14,6 +14,7 @@ use App\Services\FcmService;
 use App\Services\Reminders\ContextualReminderService;
 use App\Services\Reminders\Push\PushResult;
 use App\Services\Reminders\Push\PushTransport;
+use App\Services\Reminders\ReminderDestinations;
 use App\Services\Reminders\ReminderDispatcher;
 use App\Services\TtsService;
 use Carbon\Carbon;
@@ -121,6 +122,7 @@ class ReminderDispatchTest extends SecurityTestCase
         $this->assertFalse($defaults['contextual_dispatch_enabled']);
         $this->assertFalse($defaults['routine_dispatch_enabled']);
         $this->assertSame([], $defaults['dispatch_device_allowlist']);
+        $this->assertSame([], $defaults['dispatch_user_allowlist']);
 
         config(['reminders.contextual_dispatch_enabled' => false]);
         $this->reminder();
@@ -179,6 +181,29 @@ class ReminderDispatchTest extends SecurityTestCase
         $this->tick();
 
         $this->assertEqualsCanonicalizing([$this->phone->id, $second->id], array_column($this->push->sent, 'device_id'));
+    }
+
+    public function test_a_user_in_the_pilot_receives_on_the_latest_installation_and_survives_a_reinstall(): void
+    {
+        config(['reminders.dispatch_device_allowlist' => [], 'reminders.dispatch_user_allowlist' => [$this->owner->id]]);
+        $this->phone->forceFill(['last_used_at' => '2026-09-20 10:00:00'])->save();
+        $stale = $this->device($this->owner);
+        $stale->forceFill(['last_used_at' => '2026-09-01 10:00:00'])->save(); // instalación vieja nunca dada de baja
+        $this->device($this->owner, [])->forceFill(['last_used_at' => '2026-09-21 09:00:00'])->save(); // más reciente pero sin capacidad
+        $destinations = app(ReminderDestinations::class);
+
+        $this->assertSame([$this->phone->id], $destinations->contextual($this->owner->id)->pluck('id')->all());
+        $this->assertSame([], $destinations->contextual($this->user()->id)->all(), 'Otro usuario no está en el piloto.');
+
+        // Reinstalar crea otra instalación: pasa a ser el destino sin tocar la configuración.
+        $reinstalled = $this->device($this->owner);
+        $reinstalled->forceFill(['last_used_at' => '2026-09-21 13:00:00'])->save();
+        $this->reminder();
+        $this->at('2026-09-21T14:30:00Z');
+        $this->tick();
+
+        $this->assertSame([$reinstalled->id], array_column($this->push->sent, 'device_id'));
+        $this->assertFalse($destinations->isContextualDestination($this->phone, $this->owner->id));
     }
 
     // ---- Durabilidad y claims ----

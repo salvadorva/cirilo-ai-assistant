@@ -10,16 +10,29 @@ use Illuminate\Support\Collection;
  */
 class ReminderDestinations
 {
-    /** Contextuales: solo instalaciones compatibles y seleccionadas para el piloto. */
+    /**
+     * Contextuales: instalaciones compatibles y activas del piloto.
+     *
+     * - Usuario en el piloto (REMINDERS_DISPATCH_USER_IDS): su instalación compatible usada más
+     *   recientemente. Así reinstalar la app (que crea otra instalación) no saca al teléfono del
+     *   piloto, y las instalaciones viejas que nunca se dieron de baja no reciben nada.
+     * - Si no: las instalaciones elegidas una a una por ID (REMINDERS_DISPATCH_DEVICE_IDS).
+     */
     public function contextual(int $userId): Collection
     {
-        $allowlist = config('reminders.dispatch_device_allowlist', []);
-        if ($allowlist === []) {
+        $users = config('reminders.dispatch_user_allowlist', []);
+        $devices = config('reminders.dispatch_device_allowlist', []);
+        $byUser = in_array($userId, $users, true);
+        if (! $byUser && $devices === []) {
             return collect();
         }
 
-        return DeviceToken::where('user_id', $userId)->whereNull('disabled_at')->whereIn('id', $allowlist)->orderBy('id')->get()
-            ->filter(fn (DeviceToken $device) => $device->hasCapability(config('reminders.device_capability')))->values();
+        $compatible = DeviceToken::where('user_id', $userId)->whereNull('disabled_at')
+            ->when(! $byUser, fn ($query) => $query->whereIn('id', $devices))
+            ->orderByDesc('last_used_at')->orderByDesc('id')->get()
+            ->filter(fn (DeviceToken $device) => $device->hasCapability(config('reminders.device_capability')));
+
+        return $byUser ? $compatible->take(1)->values() : $compatible->sortBy('id')->values();
     }
 
     /** Rutinas: mismos destinos que el camino legado (todos los tokens del usuario), sin deshabilitados. */
